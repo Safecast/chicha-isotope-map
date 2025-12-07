@@ -1500,6 +1500,9 @@ body, html {
     <!-- Load Leaflet JavaScript library -->
     <script src="/static/leaflet.js"></script>
 
+    <!-- Chart.js for spectrum visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+
     <!-- Slider -->
     <script src="/static/nouislider.min.js"></script>
     <script src="/static/wNumb.min.js"></script>
@@ -2927,6 +2930,19 @@ function createDateRangeSlider(){
       ? `${(marker.speed * 3.6).toFixed(1)} km/h`
       : '—';
 
+    const hasSpectrum = marker.hasSpectrum || false;
+    const markerId = marker.id || marker.markerId;
+    const spectrumSection = hasSpectrum ? `
+        <hr style="margin: 8px 0; border-top: 1px solid #ccc;">
+        <div><strong>📊 Gamma Spectrum</strong></div>
+        <div id="spectrum-container-${markerId}" style="margin-top: 8px;">
+          <canvas id="spectrum-chart-${markerId}" style="max-height: 250px;"></canvas>
+          <div style="margin-top: 8px; text-align: center;">
+            <button onclick="downloadSpectrum(${markerId}, 'json')" style="margin: 2px; padding: 4px 8px;">Download JSON</button>
+            <button onclick="downloadSpectrum(${markerId}, 'csv')" style="margin: 2px; padding: 4px 8px;">Download CSV</button>
+          </div>
+        </div>` : '';
+
     return `
       <div class="custom-tooltip">
         <div><strong>${translate('radiation_dose')}:</strong><br>
@@ -2942,6 +2958,7 @@ function createDateRangeSlider(){
             ${translate('track_id')}: ${marker.trackID}
           </a>
         </div>
+        ${spectrumSection}
       </div>`;
   }
 
@@ -3009,23 +3026,37 @@ function updateMarkers(){
       .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
       .bindPopup(getPopupContent(m));
     } else {
-      marker = L.circleMarker([m.lat, m.lon], {
+      // Add special styling for markers with spectrum data
+      const hasSpectrum = m.hasSpectrum || false;
+      const markerStyle = {
         radius      : getRadius(m.doseRate, zoom),
         fillColor   : getGradientColor(m.doseRate),
-        color       : getGradientColor(m.doseRate),
-        weight      : 1,
-        opacity     : getFillOpacity(m.speed) + 0.1,
-        fillOpacity : getFillOpacity(m.speed)
-      })
+        color       : hasSpectrum ? '#FFD700' : getGradientColor(m.doseRate), // Gold border for spectrum
+        weight      : hasSpectrum ? 3 : 1,  // Thicker border for spectrum markers
+        opacity     : hasSpectrum ? 0.9 : (getFillOpacity(m.speed) + 0.1),
+        fillOpacity : getFillOpacity(m.speed),
+        dashArray   : hasSpectrum ? '5, 5' : null  // Dashed border for spectrum markers
+      };
+
+      marker = L.circleMarker([m.lat, m.lon], markerStyle)
       .addTo(map)
       .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
       .bindPopup(getPopupContent(m));
+
+      // Load spectrum data when popup opens
+      if (hasSpectrum && m.id) {
+        marker.on('popupopen', function() {
+          loadAndRenderSpectrum(m.id);
+        });
+      }
     }
 
     // Store dose rate and timestamp on marker for later size updates
     marker.doseRate  = m.doseRate;
     marker.date      = m.date;
     marker.isRealtime = isLive;
+    marker.hasSpectrum = m.hasSpectrum || false;
+    marker.markerId = m.id;  // Store marker ID for spectrum API calls
     circleMarkers[m.id || m.trackID] = marker;
   };
 
@@ -3068,6 +3099,122 @@ async function fetchLiveHistory(deviceID) {
   const data = await resp.json();
   liveHistoryCache.set(deviceID, data);
   return data;
+}
+
+// Spectrum data caching and visualization
+const spectrumCache = new Map();
+let activeSpectrumCharts = new Map();
+
+async function fetchSpectrum(markerID) {
+  if (!markerID) return null;
+  if (spectrumCache.has(markerID)) {
+    return spectrumCache.get(markerID);
+  }
+  try {
+    const resp = await fetch(`/api/spectrum/${markerID}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    spectrumCache.set(markerID, data);
+    return data;
+  } catch (err) {
+    console.error('Error fetching spectrum:', err);
+    return null;
+  }
+}
+
+function renderSpectrumChart(markerID, spectrum) {
+  const canvasId = `spectrum-chart-${markerID}`;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  // Destroy existing chart if it exists
+  if (activeSpectrumCharts.has(canvasId)) {
+    activeSpectrumCharts.get(canvasId).destroy();
+  }
+
+  const ctx = canvas.getContext('2d');
+
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  const colors = chartColors();
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: energies,
+      datasets: [{
+        label: 'Counts',
+        data: spectrum.channels,
+        borderColor: '#FFD700',
+        backgroundColor: 'rgba(255, 215, 0, 0.1)',
+        borderWidth: 1,
+        pointRadius: 0,
+        tension: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          type: 'linear',
+          title: {
+            display: true,
+            text: 'Energy (keV)',
+            color: colors.text
+          },
+          ticks: { color: colors.text },
+          grid: { color: colors.grid }
+        },
+        y: {
+          type: 'logarithmic',
+          title: {
+            display: true,
+            text: 'Counts',
+            color: colors.text
+          },
+          ticks: { color: colors.text },
+          grid: { color: colors.grid }
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            title: function(context) {
+              return `Energy: ${context[0].label} keV`;
+            },
+            label: function(context) {
+              return `Counts: ${context.parsed.y}`;
+            }
+          }
+        }
+      }
+    }
+  });
+
+  activeSpectrumCharts.set(canvasId, chart);
+}
+
+async function loadAndRenderSpectrum(markerID) {
+  const spectrum = await fetchSpectrum(markerID);
+  if (spectrum) {
+    renderSpectrumChart(markerID, spectrum);
+  }
+}
+
+function downloadSpectrum(markerID, format) {
+  const url = `/api/spectrum/${markerID}/download?format=${format}`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `spectrum_${markerID}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 function chartColors() {

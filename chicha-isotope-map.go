@@ -57,6 +57,7 @@ import (
 	"chicha-isotope-map/pkg/qrlogoext"
 	safecastrealtime "chicha-isotope-map/pkg/safecast-realtime"
 	"chicha-isotope-map/pkg/selfupgrade"
+	"chicha-isotope-map/pkg/spectrum"
 )
 
 // content bundles the UI and the license texts so single-file binaries still
@@ -2498,6 +2499,84 @@ func processRCTRKFile(
 	return processAndStoreMarkers(markers, trackID, db, dbType)
 }
 
+// processN42File handles ANSI N42.42 XML files with gamma spectrum data.
+func processN42File(
+	file multipart.File,
+	trackID string,
+	db *database.Database,
+	dbType string,
+) (database.Bounds, string, error) {
+	logT(trackID, "N42", "▶ start")
+
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("read N42: %w", err)
+	}
+
+	// Parse N42 file to extract spectra and markers
+	spectra, markers, err := spectrum.ParseN42(raw)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("parse N42: %w", err)
+	}
+
+	logT(trackID, "N42", "parsed %d spectra, %d markers", len(spectra), len(markers))
+
+	if len(markers) == 0 {
+		return database.Bounds{}, trackID, fmt.Errorf("no markers found in N42 file")
+	}
+
+	// Set trackID for all markers
+	for i := range markers {
+		if markers[i].TrackID == "" {
+			markers[i].TrackID = trackID
+		}
+	}
+
+	// Store markers and get their IDs
+	bounds, storedTrackID, err := processAndStoreMarkers(markers, trackID, db, dbType)
+	if err != nil {
+		return bounds, storedTrackID, fmt.Errorf("store markers: %w", err)
+	}
+
+	// Get the marker IDs from database to link spectra
+	ctx := context.Background()
+	for i := range spectra {
+		// Find the corresponding marker by matching coordinates and timestamp
+		// For simplicity, we'll assume the order is preserved
+		if i < len(markers) {
+			// Query for marker ID by location and timestamp
+			var markerID int64
+			query := "SELECT id FROM markers WHERE lat = ? AND lon = ? AND date = ? LIMIT 1"
+			args := []interface{}{markers[i].Lat, markers[i].Lon, markers[i].Date}
+
+			if dbType == "pgx" {
+				query = "SELECT id FROM markers WHERE lat = $1 AND lon = $2 AND date = $3 LIMIT 1"
+			}
+
+			err := db.DB.QueryRowContext(ctx, query, args...).Scan(&markerID)
+			if err != nil {
+				logT(trackID, "N42", "warning: could not find marker ID for spectrum %d: %v", i, err)
+				continue
+			}
+
+			spectra[i].MarkerID = markerID
+			spectra[i].RawData = raw // Store original N42 file
+
+			// Insert spectrum
+			spectrumID, err := db.InsertSpectrum(ctx, spectra[i])
+			if err != nil {
+				logT(trackID, "N42", "warning: failed to insert spectrum %d: %v", i, err)
+				continue
+			}
+
+			logT(trackID, "N42", "inserted spectrum %d for marker %d", spectrumID, markerID)
+		}
+	}
+
+	logT(trackID, "N42", "✓ complete")
+	return bounds, storedTrackID, nil
+}
+
 // processAtomFastFile handles Atom Fast JSON export (*.json).
 func processAtomFastFile(
 	file multipart.File,
@@ -3699,6 +3778,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			bbox, trackID, err = processAtomSwiftCSVFile(f, trackID, db, *dbType)
 		case ".rctrk":
 			bbox, trackID, err = processRCTRKFile(f, trackID, db, *dbType)
+		case ".n42":
+			bbox, trackID, err = processN42File(f, trackID, db, *dbType)
 		case ".cim":
 			var imported bool
 			bbox, trackID, imported, err = processTrackExportFile(r.Context(), f, trackID, db, *dbType)
@@ -4123,6 +4204,175 @@ func shortRedirectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// =====================
+// API  — Spectrum Data
+// =====================
+
+// spectrumHandler returns spectrum data for a specific marker.
+// GET /api/spectrum/{markerID}
+// GET /api/spectrum/{markerID}/download?format=...
+func spectrumHandler(w http.ResponseWriter, r *http.Request) {
+	// Route to download handler if path contains "download"
+	if strings.Contains(r.URL.Path, "/download") {
+		spectrumDownloadHandler(w, r)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract marker ID from URL path: /api/spectrum/{markerID}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Marker ID not provided", http.StatusBadRequest)
+		return
+	}
+
+	markerID, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid marker ID", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	spectrum, err := db.GetSpectrum(ctx, markerID)
+	if err != nil {
+		log.Printf("Error fetching spectrum for marker %d: %v", markerID, err)
+		http.Error(w, "Error fetching spectrum", http.StatusInternalServerError)
+		return
+	}
+
+	if spectrum == nil {
+		http.Error(w, "No spectrum found for this marker", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(spectrum)
+}
+
+// spectrumDownloadHandler downloads a spectrum file in requested format.
+// GET /api/spectrum/{markerID}/download?format=n42|json|csv
+func spectrumDownloadHandler(w http.ResponseWriter, r *http.Request) {
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract marker ID from URL path: /api/spectrum/{markerID}/download
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Marker ID not provided", http.StatusBadRequest)
+		return
+	}
+
+	markerID, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid marker ID", http.StatusBadRequest)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json" // Default format
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	spectrum, err := db.GetSpectrum(ctx, markerID)
+	if err != nil {
+		log.Printf("Error fetching spectrum for marker %d: %v", markerID, err)
+		http.Error(w, "Error fetching spectrum", http.StatusInternalServerError)
+		return
+	}
+
+	if spectrum == nil {
+		http.Error(w, "No spectrum found for this marker", http.StatusNotFound)
+		return
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.json", markerID))
+		json.NewEncoder(w).Encode(spectrum)
+
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.csv", markerID))
+		// Write CSV: energy, counts
+		fmt.Fprintf(w, "Channel,Energy_keV,Counts\n")
+		for i, count := range spectrum.Channels {
+			energy := 0.0
+			if spectrum.Calibration != nil {
+				ch := float64(i)
+				energy = spectrum.Calibration.A + spectrum.Calibration.B*ch + spectrum.Calibration.C*ch*ch
+			}
+			fmt.Fprintf(w, "%d,%.2f,%d\n", i, energy, count)
+		}
+
+	case "n42":
+		if len(spectrum.RawData) > 0 {
+			// Return original N42 file if available
+			w.Header().Set("Content-Type", "application/xml")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.n42", markerID))
+			w.Write(spectrum.RawData)
+		} else {
+			http.Error(w, "N42 format not available for this spectrum", http.StatusNotFound)
+		}
+
+	default:
+		http.Error(w, fmt.Sprintf("Unsupported format: %s", format), http.StatusBadRequest)
+	}
+}
+
+// markersWithSpectraHandler returns markers that have associated spectral data.
+// GET /api/markers/spectra?minLat=...&maxLat=...&minLon=...&maxLon=...
+func markersWithSpectraHandler(w http.ResponseWriter, r *http.Request) {
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	q := r.URL.Query()
+	minLat, _ := strconv.ParseFloat(q.Get("minLat"), 64)
+	minLon, _ := strconv.ParseFloat(q.Get("minLon"), 64)
+	maxLat, _ := strconv.ParseFloat(q.Get("maxLat"), 64)
+	maxLon, _ := strconv.ParseFloat(q.Get("maxLon"), 64)
+
+	// Validate bounds
+	if minLat == 0 && maxLat == 0 && minLon == 0 && maxLon == 0 {
+		// Default to world bounds
+		minLat, maxLat = -90, 90
+		minLon, maxLon = -180, 180
+	}
+
+	bounds := database.Bounds{
+		MinLat: minLat,
+		MaxLat: maxLat,
+		MinLon: minLon,
+		MaxLon: maxLon,
+	}
+
+	markers, err := db.GetMarkersWithSpectra(ctx, bounds)
+	if err != nil {
+		log.Printf("Error fetching markers with spectra: %v", err)
+		http.Error(w, "Error fetching markers", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(markers)
 }
 
 // =====================
@@ -5202,6 +5452,8 @@ func main() {
 	http.HandleFunc("/api/geoip", geoIPHandler)
 	http.HandleFunc("/s/", shortRedirectHandler)
 	http.HandleFunc("/api/docs", apiDocsHandler)
+	http.HandleFunc("/api/spectrum/", spectrumHandler)                  // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
+	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)  // GET /api/markers/spectra
 
 	// API endpoints ship JSON/archives. Keeping registration close to other
 	// routes avoids surprises for operators scanning main() for handlers.

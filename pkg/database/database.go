@@ -1449,6 +1449,7 @@ CREATE TABLE IF NOT EXISTS markers (
   device_name TEXT,
   tube        TEXT,
   country     TEXT,
+  has_spectrum BOOLEAN DEFAULT FALSE,
   CONSTRAINT markers_unique UNIQUE (doseRate,date,lon,lat,countRate,zoom,speed,trackID)
 );
 
@@ -1484,6 +1485,24 @@ CREATE INDEX IF NOT EXISTS idx_short_links_target_lookup
   ON short_links (target);
 CREATE INDEX IF NOT EXISTS idx_short_links_created
   ON short_links (created_at);
+
+CREATE TABLE IF NOT EXISTS spectra (
+  id              BIGSERIAL PRIMARY KEY,
+  marker_id       BIGINT NOT NULL REFERENCES markers(id) ON DELETE CASCADE,
+  channels        TEXT,
+  channel_count   INTEGER DEFAULT 1024,
+  energy_min_kev  DOUBLE PRECISION,
+  energy_max_kev  DOUBLE PRECISION,
+  live_time_sec   DOUBLE PRECISION,
+  real_time_sec   DOUBLE PRECISION,
+  device_model    TEXT,
+  calibration     TEXT,
+  source_format   TEXT,
+  raw_data        BYTEA,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
 `
 
 	case "sqlite", "chai":
@@ -1508,7 +1527,8 @@ CREATE TABLE IF NOT EXISTS markers (
   transport   TEXT,
   device_name TEXT,
   tube        TEXT,
-  country     TEXT
+  country     TEXT,
+  has_spectrum INTEGER DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_markers_unique
   ON markers (doseRate,date,lon,lat,countRate,zoom,speed,trackID);
@@ -1545,6 +1565,24 @@ CREATE INDEX IF NOT EXISTS idx_short_links_target_lookup
   ON short_links (target);
 CREATE INDEX IF NOT EXISTS idx_short_links_created
   ON short_links (created_at);
+
+CREATE TABLE IF NOT EXISTS spectra (
+  id              INTEGER PRIMARY KEY,
+  marker_id       BIGINT NOT NULL,
+  channels        TEXT,
+  channel_count   INTEGER DEFAULT 1024,
+  energy_min_kev  REAL,
+  energy_max_kev  REAL,
+  live_time_sec   REAL,
+  real_time_sec   REAL,
+  device_model    TEXT,
+  calibration     TEXT,
+  source_format   TEXT,
+  raw_data        BLOB,
+  created_at      BIGINT NOT NULL,
+  FOREIGN KEY (marker_id) REFERENCES markers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
 `
 
 	case "duckdb":
@@ -1574,6 +1612,7 @@ CREATE TABLE IF NOT EXISTS markers (
   device_name TEXT,
   tube        TEXT,
   country     TEXT,
+  has_spectrum BOOLEAN DEFAULT FALSE,
   CONSTRAINT markers_unique UNIQUE (doseRate,date,lon,lat,countRate,zoom,speed,trackID)
 );
 
@@ -1610,6 +1649,25 @@ CREATE INDEX IF NOT EXISTS idx_short_links_target_lookup
   ON short_links (target);
 CREATE INDEX IF NOT EXISTS idx_short_links_created
   ON short_links (created_at);
+
+CREATE SEQUENCE IF NOT EXISTS spectra_id_seq START 1;
+CREATE TABLE IF NOT EXISTS spectra (
+  id              BIGINT PRIMARY KEY DEFAULT nextval('spectra_id_seq'),
+  marker_id       BIGINT NOT NULL,
+  channels        TEXT,
+  channel_count   INTEGER DEFAULT 1024,
+  energy_min_kev  DOUBLE,
+  energy_max_kev  DOUBLE,
+  live_time_sec   DOUBLE,
+  real_time_sec   DOUBLE,
+  device_model    TEXT,
+  calibration     TEXT,
+  source_format   TEXT,
+  raw_data        BLOB,
+  created_at      TIMESTAMP DEFAULT NOW(),
+  FOREIGN KEY (marker_id) REFERENCES markers(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
 `
 
 	case "clickhouse":
@@ -1633,7 +1691,8 @@ CREATE INDEX IF NOT EXISTS idx_short_links_created
   transport   String,
   device_name String,
   tube        String,
-  country     String
+  country     String,
+  has_spectrum UInt8 DEFAULT 0
 ) ENGINE = MergeTree()
 ORDER BY (trackID, date, id);`,
 			`CREATE TABLE IF NOT EXISTS tracks (
@@ -1663,6 +1722,22 @@ ORDER BY (device_id, measured_at);`,
   created_at DateTime DEFAULT now()
 ) ENGINE = MergeTree()
 ORDER BY (code);`,
+			`CREATE TABLE IF NOT EXISTS spectra (
+  id              UInt64,
+  marker_id       UInt64,
+  channels        String,
+  channel_count   UInt32 DEFAULT 1024,
+  energy_min_kev  Float64,
+  energy_max_kev  Float64,
+  live_time_sec   Float64,
+  real_time_sec   Float64,
+  device_model    String,
+  calibration     String,
+  source_format   String,
+  raw_data        String,
+  created_at      DateTime DEFAULT now()
+) ENGINE = MergeTree()
+ORDER BY (marker_id, id);`,
 		}
 
 	default:
@@ -1685,6 +1760,10 @@ ORDER BY (code);`,
 	}
 	if err := db.ensureRealtimeMetadataColumns(cfg.DBType); err != nil {
 		return fmt.Errorf("add realtime metadata column: %w", err)
+	}
+	// Create spectral data indexes after has_spectrum column is added
+	if err := db.ensureSpectralDataIndexes(cfg.DBType); err != nil {
+		return fmt.Errorf("create spectral data indexes: %w", err)
 	}
 
 	return nil
@@ -1727,6 +1806,7 @@ func (db *Database) ensureMarkerMetadataColumns(dbType string) error {
 		{name: "device_name", def: "device_name TEXT"},
 		{name: "tube", def: "tube TEXT"},
 		{name: "country", def: "country TEXT"},
+		{name: "has_spectrum", def: "has_spectrum INTEGER DEFAULT 0"},
 	}
 
 	switch strings.ToLower(dbType) {
@@ -1848,6 +1928,30 @@ func (db *Database) ensureRealtimeMetadataColumns(dbType string) error {
 		}
 		return nil
 	}
+}
+
+// ensureSpectralDataIndexes creates indexes for spectral data after columns have been migrated.
+// This runs after ensureMarkerMetadataColumns so the has_spectrum column exists.
+func (db *Database) ensureSpectralDataIndexes(dbType string) error {
+	var indexStmt string
+
+	switch strings.ToLower(dbType) {
+	case "pgx", "duckdb":
+		indexStmt = "CREATE INDEX IF NOT EXISTS idx_markers_has_spectrum ON markers(has_spectrum) WHERE has_spectrum = TRUE"
+	case "sqlite", "chai":
+		indexStmt = "CREATE INDEX IF NOT EXISTS idx_markers_has_spectrum ON markers(has_spectrum) WHERE has_spectrum = 1"
+	case "clickhouse":
+		// ClickHouse uses a different index strategy
+		return nil
+	default:
+		indexStmt = "CREATE INDEX IF NOT EXISTS idx_markers_has_spectrum ON markers(has_spectrum) WHERE has_spectrum = 1"
+	}
+
+	if _, err := db.DB.Exec(indexStmt); err != nil {
+		return fmt.Errorf("create has_spectrum index: %w", err)
+	}
+
+	return nil
 }
 
 // MarkerBatchProgress reports how many markers a bulk insert has flushed so operators can track
