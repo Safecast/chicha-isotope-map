@@ -2606,6 +2606,113 @@ func processN42File(
 	return bounds, storedTrackID, nil
 }
 
+// processSPEFile handles IAEA SPE format files with gamma spectrum data.
+func processSPEFile(
+	file multipart.File,
+	trackID string,
+	db *database.Database,
+	dbType string,
+) (database.Bounds, string, error) {
+	logT(trackID, "SPE", "▶ start")
+
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("read SPE: %w", err)
+	}
+
+	// Parse SPE file to extract spectra and markers
+	spectra, markers, err := spectrum.ParseSPE(raw)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("parse SPE: %w", err)
+	}
+
+	logT(trackID, "SPE", "parsed %d spectra, %d markers", len(spectra), len(markers))
+
+	if len(markers) == 0 {
+		return database.Bounds{}, trackID, fmt.Errorf("no markers found in SPE file")
+	}
+
+	// Set trackID for all markers
+	for i := range markers {
+		if markers[i].TrackID == "" {
+			markers[i].TrackID = trackID
+		}
+	}
+
+	// Store markers and get their IDs
+	bounds, storedTrackID, err := processAndStoreMarkers(markers, trackID, db, dbType)
+	if err != nil {
+		return bounds, storedTrackID, fmt.Errorf("store markers: %w", err)
+	}
+
+	// Get the marker IDs from database to link spectra
+	ctx := context.Background()
+	for i := range spectra {
+		// Find the corresponding marker by matching coordinates and timestamp
+		// For simplicity, we'll assume the order is preserved
+		if i < len(markers) {
+			// Query for ALL marker IDs with this location and timestamp (across all zoom levels)
+			query := "SELECT id FROM markers WHERE lat = ? AND lon = ? AND date = ?"
+			args := []interface{}{markers[i].Lat, markers[i].Lon, markers[i].Date}
+
+			if dbType == "pgx" {
+				query = "SELECT id FROM markers WHERE lat = $1 AND lon = $2 AND date = $3"
+			}
+
+			rows, err := db.DB.QueryContext(ctx, query, args...)
+			if err != nil {
+				logT(trackID, "SPE", "warning: could not query markers for spectrum %d: %v", i, err)
+				continue
+			}
+
+			var markerIDs []int64
+			for rows.Next() {
+				var mid int64
+				if err := rows.Scan(&mid); err != nil {
+					logT(trackID, "SPE", "warning: failed to scan marker ID: %v", err)
+					continue
+				}
+				markerIDs = append(markerIDs, mid)
+			}
+			rows.Close()
+
+			if len(markerIDs) == 0 {
+				logT(trackID, "SPE", "warning: no markers found for spectrum %d", i)
+				continue
+			}
+
+			// Insert spectrum using the first marker ID (typically zoom=0)
+			spectra[i].MarkerID = markerIDs[0]
+			spectra[i].RawData = raw // Store original SPE file
+
+			spectrumID, err := db.InsertSpectrum(ctx, spectra[i])
+			if err != nil {
+				logT(trackID, "SPE", "warning: failed to insert spectrum %d: %v", i, err)
+				continue
+			}
+
+			// Update has_spectrum flag for ALL markers at this location/time (all zoom levels)
+			updateQuery := "UPDATE markers SET has_spectrum = ? WHERE lat = ? AND lon = ? AND date = ?"
+			updateArgs := []interface{}{true, markers[i].Lat, markers[i].Lon, markers[i].Date}
+			if dbType == "pgx" {
+				updateQuery = "UPDATE markers SET has_spectrum = $1 WHERE lat = $2 AND lon = $3 AND date = $4"
+			}
+
+			result, err := db.DB.ExecContext(ctx, updateQuery, updateArgs...)
+			if err != nil {
+				logT(trackID, "SPE", "warning: failed to update has_spectrum flags: %v", err)
+			} else {
+				if count, _ := result.RowsAffected(); count > 0 {
+					logT(trackID, "SPE", "inserted spectrum %d for marker %d (updated %d zoom levels)", spectrumID, markerIDs[0], count)
+				}
+			}
+		}
+	}
+
+	logT(trackID, "SPE", "✓ complete")
+	return bounds, storedTrackID, nil
+}
+
 // processAtomFastFile handles Atom Fast JSON export (*.json).
 func processAtomFastFile(
 	file multipart.File,
@@ -3809,6 +3916,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			bbox, trackID, err = processRCTRKFile(f, trackID, db, *dbType)
 		case ".n42":
 			bbox, trackID, err = processN42File(f, trackID, db, *dbType)
+		case ".spe":
+			bbox, trackID, err = processSPEFile(f, trackID, db, *dbType)
 		case ".cim":
 			var imported bool
 			bbox, trackID, imported, err = processTrackExportFile(r.Context(), f, trackID, db, *dbType)
@@ -4348,13 +4457,23 @@ func spectrumDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "n42":
-		if len(spectrum.RawData) > 0 {
+		if len(spectrum.RawData) > 0 && spectrum.SourceFormat == "n42" {
 			// Return original N42 file if available
 			w.Header().Set("Content-Type", "application/xml")
 			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.n42", markerID))
 			w.Write(spectrum.RawData)
 		} else {
 			http.Error(w, "N42 format not available for this spectrum", http.StatusNotFound)
+		}
+
+	case "spe":
+		if len(spectrum.RawData) > 0 && spectrum.SourceFormat == "spe" {
+			// Return original SPE file if available
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.spe", markerID))
+			w.Write(spectrum.RawData)
+		} else {
+			http.Error(w, "SPE format not available for this spectrum", http.StatusNotFound)
 		}
 
 	default:

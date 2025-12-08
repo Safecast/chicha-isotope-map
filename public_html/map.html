@@ -51,6 +51,7 @@ body, html {
           --info-card-border: 1px solid rgba(0, 0, 0, 0.08);
           --api-method-bg: rgba(0, 123, 255, 0.1);
           --api-method-text: #0056b3;
+          --isotope-highlight: #FF6B00; /* Orange for light mode - better contrast */
           color-scheme: light; /* Default to light scheme */
           --font-family-base: "Segoe UI", "Noto Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; /* Shared font stack keeps every control aligned */
           --font-size-base: 12px; /* Main text size for buttons, menus, and labels */
@@ -82,6 +83,7 @@ body, html {
             --info-card-border: 1px solid rgba(255, 255, 255, 0.08);
             --api-method-bg: rgba(144, 202, 249, 0.2);
             --api-method-text: #90caf9;
+            --isotope-highlight: #FFD700; /* Gold for dark mode */
             color-scheme: dark; /* Match system dark scheme */
           }
         }
@@ -159,6 +161,7 @@ body, html {
           --info-card-border: 1px solid rgba(0, 0, 0, 0.08);
           --api-method-bg: rgba(0, 123, 255, 0.1);
           --api-method-text: #0056b3;
+          --isotope-highlight: #FF6B00; /* Orange for light mode - better contrast */
           color-scheme: light; /* Force light scheme when manually selected */
         }
 
@@ -181,6 +184,7 @@ body, html {
           --info-card-border: 1px solid rgba(255, 255, 255, 0.08);
           --api-method-bg: rgba(144, 202, 249, 0.2);
           --api-method-text: #90caf9;
+          --isotope-highlight: #FFD700; /* Gold for dark mode */
           color-scheme: dark; /* Force dark scheme when manually selected */
         }
 
@@ -1518,34 +1522,60 @@ body, html {
       </div>
     </div>
     <div id="spectrumIsotopes" style="margin-top: 16px; padding: 12px; background: var(--control-bg); border: var(--legend-border); border-radius: 8px;">
-      <h4 style="margin: 0 0 8px 0; font-size: var(--font-size-base); font-weight: 600; color: var(--modal-text);">Identified Isotopes</h4>
-      <div id="spectrumIsotopeList" style="display: grid; gap: 8px; font-size: var(--font-size-sm);">
-        <!-- Placeholder isotope entries - will be populated dynamically -->
-        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
-          <span style="font-weight: 600; color: var(--modal-text);">Ba-133</span>
-          <span style="color: var(--modal-text); opacity: 0.75;">Barium-133</span>
-          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">356 keV, 81 keV</span>
-        </div>
-        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
-          <span style="font-weight: 600; color: var(--modal-text);">Cs-137</span>
-          <span style="color: var(--modal-text); opacity: 0.75;">Cesium-137</span>
-          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">662 keV</span>
-        </div>
-        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
-          <span style="font-weight: 600; color: var(--modal-text);">Co-60</span>
-          <span style="color: var(--modal-text); opacity: 0.75;">Cobalt-60</span>
-          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">1173 keV, 1332 keV</span>
-        </div>
+      <h4 style="margin: 0 0 8px 0; font-size: var(--font-size-base); font-weight: 600; color: var(--modal-text);">Common Isotope Peaks Reference</h4>
+      <div id="spectrumIsotopeList" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 4px 12px; font-size: var(--font-size-sm);">
+        <!-- Will be populated dynamically with isotope reference list -->
+        <div style="padding: 4px 0; color: var(--modal-text); opacity: 0.6; font-style: italic;">Loading isotope database...</div>
       </div>
-      <p style="margin: 8px 0 0 0; font-size: var(--font-size-xs); color: var(--modal-text); opacity: 0.6; font-style: italic;">
-        Peak identification is for demonstration purposes. Actual isotope identification requires calibration and analysis.
-      </p>
     </div>
     <div style="margin-top: 16px; text-align: center;">
       <button id="spectrumDownloadJSON" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download JSON</button>
       <button id="spectrumDownloadCSV" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download CSV</button>
     </div>
     <button type="button" class="live-modal-close" id="spectrumModalClose">Close</button>
+  </div>
+</div>
+
+<!-- Coordinate Input Dialog for spectrum files without GPS -->
+<div id="coordinateInputDialog" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 10001; align-items: center; justify-content: center;">
+  <div style="background: var(--modal-bg); padding: 24px; border-radius: 12px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+    <h3 style="margin: 0 0 16px 0; color: var(--modal-text); font-size: 20px;">📍 Set Spectrum Location</h3>
+    <p style="margin: 0 0 20px 0; color: var(--modal-text); opacity: 0.8; font-size: var(--font-size-base);">
+      This spectrum file doesn't contain GPS coordinates. Please enter the location where the measurement was taken.
+    </p>
+
+    <div style="margin-bottom: 16px;">
+      <label style="display: block; margin-bottom: 6px; color: var(--modal-text); font-weight: 600;">Latitude:</label>
+      <input type="number" id="coordInputLat" step="0.000001" placeholder="e.g., 34.4883891"
+             style="width: 100%; padding: 10px; border: var(--legend-border); border-radius: 6px; background: var(--control-bg); color: var(--modal-text); font-size: var(--font-size-base); box-sizing: border-box;">
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 6px; color: var(--modal-text); font-weight: 600;">Longitude:</label>
+      <input type="number" id="coordInputLon" step="0.000001" placeholder="e.g., 136.1659156"
+             style="width: 100%; padding: 10px; border: var(--legend-border); border-radius: 6px; background: var(--control-bg); color: var(--modal-text); font-size: var(--font-size-base); box-sizing: border-box;">
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+      <button id="coordMapPickBtn" style="flex: 1; padding: 10px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text); font-size: var(--font-size-base);">
+        📌 Click on Map
+      </button>
+      <button id="coordCurrentBtn" style="flex: 1; padding: 10px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text); font-size: var(--font-size-base);">
+        📍 Use Current Location
+      </button>
+    </div>
+
+    <div style="display: flex; gap: 12px;">
+      <button id="coordSubmitBtn" style="flex: 1; padding: 12px; background: #4CAF50; border: none; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; font-size: var(--font-size-base);">
+        Submit Location
+      </button>
+      <button id="coordCancelBtn" style="flex: 1; padding: 12px; background: #f44336; border: none; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; font-size: var(--font-size-base);">
+        Cancel
+      </button>
+    </div>
+
+    <p id="coordInputError" style="margin: 12px 0 0 0; color: #f44336; font-size: var(--font-size-sm); display: none;"></p>
+    <p id="coordInputStatus" style="margin: 12px 0 0 0; color: var(--isotope-highlight); font-size: var(--font-size-sm); opacity: 0.8;"></p>
   </div>
 </div>
 
@@ -3091,7 +3121,7 @@ function updateMarkers(){
         const fontSize = Math.max(Math.round(size * 0.32), 11);
 
         const html = `
-          <div class="spectrum-marker" style="background:${fillColor};border:3px solid #FFD700;color:#000000;width:${size}px;height:${size}px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:bold;">
+          <div class="spectrum-marker" style="background:${fillColor};border:3px solid var(--isotope-highlight);color:#000000;width:${size}px;height:${size}px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:bold;">
             <div style="font-size:${Math.max(fontSize * 0.8, 10)}px;">📊</div>
             <div>${value}</div>
           </div>`;
@@ -3970,6 +4000,53 @@ function hideSpectrumModal() {
   if (modal) modal.style.display = 'none';
 }
 
+function identifyIsotopesInSpectrum(spectrum) {
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  // Find peaks in the spectrum (simple threshold-based detection)
+  const maxCount = Math.max(...spectrum.channels);
+  const threshold = maxCount * 0.1; // Peaks must be at least 10% of max
+  const peaks = [];
+
+  for (let i = 1; i < spectrum.channels.length - 1; i++) {
+    const count = spectrum.channels[i];
+    const prevCount = spectrum.channels[i - 1];
+    const nextCount = spectrum.channels[i + 1];
+
+    // Check if this is a local maximum above threshold
+    if (count > threshold && count > prevCount && count > nextCount) {
+      peaks.push({ energy: energies[i], count: count });
+    }
+  }
+
+  // Match peaks to isotopes
+  const detectedIsotopes = new Map(); // Use Map to avoid duplicates
+  const tolerance = 15; // keV tolerance for matching
+
+  peaks.forEach(peak => {
+    const isotope = findIsotopeByEnergy(peak.energy, tolerance);
+    if (isotope) {
+      if (!detectedIsotopes.has(isotope)) {
+        detectedIsotopes.set(isotope, []);
+      }
+      detectedIsotopes.get(isotope).push(peak.energy.toFixed(1));
+    }
+  });
+
+  // Convert Map to array of objects
+  const result = [];
+  detectedIsotopes.forEach((energies, isotope) => {
+    result.push({
+      isotope: isotope,
+      energies: energies
+    });
+  });
+
+  return result;
+}
+
 async function openSpectrumModal(markerID, fallbackMarker) {
   const modal = document.getElementById('spectrumModal');
   if (!modal) return;
@@ -4021,6 +4098,20 @@ async function openSpectrumModal(markerID, fallbackMarker) {
     const spectrum = await fetchSpectrum(markerID);
     if (spectrum && canvas) {
       drawSpectrumChart(canvas, spectrum);
+
+      // Display complete isotope reference list
+      const isotopeList = buildIsotopeReferenceList();
+      const isotopeListEl = document.getElementById('spectrumIsotopeList');
+
+      if (isotopeListEl) {
+        // Create two-column compact layout
+        isotopeListEl.innerHTML = isotopeList.map(item => `
+          <div style="display: flex; align-items: baseline; gap: 6px; font-size: var(--font-size-sm); line-height: 1.6;">
+            <span style="font-weight: 600; color: var(--isotope-highlight); min-width: 90px;">${item.name}:</span>
+            <span style="font-family: monospace; color: var(--modal-text); opacity: 0.85;">${item.energies} keV</span>
+          </div>
+        `).join('');
+      }
     } else if (emptyEl) {
       emptyEl.textContent = 'No spectrum data available';
       emptyEl.style.display = 'block';
@@ -4070,6 +4161,29 @@ function findIsotopeByEnergy(energy, tolerance = 10) {
     }
   }
   return null;
+}
+
+function buildIsotopeReferenceList() {
+  // Group energies by isotope
+  const isotopeMap = new Map();
+
+  isotopeEnergyTable.forEach(entry => {
+    if (!isotopeMap.has(entry.isotope)) {
+      isotopeMap.set(entry.isotope, []);
+    }
+    isotopeMap.get(entry.isotope).push(entry.energy);
+  });
+
+  // Convert to array and format
+  const isotopes = [];
+  isotopeMap.forEach((energies, isotope) => {
+    isotopes.push({
+      name: isotope,
+      energies: energies.join(', ')
+    });
+  });
+
+  return isotopes;
 }
 
 function drawSpectrumChart(canvas, spectrum) {
@@ -4263,7 +4377,7 @@ function drawSpectrumChart(canvas, spectrum) {
     // Update tooltip content and position
     let tooltipContent = '';
     if (isotope) {
-      tooltipContent = `<div style="color: #FFD700; font-weight: bold;">${isotope}</div><strong>${energy.toFixed(1)} keV</strong><br>Counts: ${count}`;
+      tooltipContent = `<div style="color: var(--isotope-highlight); font-weight: bold;">${isotope}</div><strong>${energy.toFixed(1)} keV</strong><br>Counts: ${count}`;
     } else {
       tooltipContent = `<strong>${energy.toFixed(1)} keV</strong><br>Counts: ${count}`;
     }
@@ -4979,6 +5093,165 @@ function centerMapToLocation() {
       }
     </script>
 
+    <!-- Coordinate Input Dialog Script -->
+    <script>
+      let pendingCoordinateUpdate = null;
+
+      function showCoordinateDialog(trackID, fileName) {
+        pendingCoordinateUpdate = { trackID, fileName };
+        const dialog = document.getElementById('coordinateInputDialog');
+        const statusEl = document.getElementById('coordInputStatus');
+        const errorEl = document.getElementById('coordInputError');
+
+        statusEl.textContent = `File: ${fileName}`;
+        statusEl.style.display = 'block';
+        errorEl.style.display = 'none';
+
+        dialog.style.display = 'flex';
+
+        // Pre-fill with current map center if available
+        if (map) {
+          const center = map.getCenter();
+          document.getElementById('coordInputLat').value = center.lat.toFixed(6);
+          document.getElementById('coordInputLon').value = center.lng.toFixed(6);
+        }
+      }
+
+      function hideCoordinateDialog() {
+        document.getElementById('coordinateInputDialog').style.display = 'none';
+        pendingCoordinateUpdate = null;
+      }
+
+      async function submitCoordinates() {
+        const latInput = document.getElementById('coordInputLat');
+        const lonInput = document.getElementById('coordInputLon');
+        const errorEl = document.getElementById('coordInputError');
+        const submitBtn = document.getElementById('coordSubmitBtn');
+
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+
+        // Validate inputs
+        if (isNaN(lat) || isNaN(lon)) {
+          errorEl.textContent = 'Please enter valid numbers for latitude and longitude.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (lat < -90 || lat > 90) {
+          errorEl.textContent = 'Latitude must be between -90 and 90.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (lon < -180 || lon > 180) {
+          errorEl.textContent = 'Longitude must be between -180 and 180.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (!pendingCoordinateUpdate) {
+          errorEl.textContent = 'No pending upload to update.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        // Disable submit button during request
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        errorEl.style.display = 'none';
+
+        try {
+          const response = await fetch('/api/update-coordinates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              trackID: pendingCoordinateUpdate.trackID,
+              lat: lat,
+              lon: lon
+            })
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.status === 'success') {
+            // Success! Navigate to the updated markers
+            hideCoordinateDialog();
+            const zoom = 15;
+            window.location.href = `/#${zoom}/${lat}/${lon}`;
+          } else {
+            errorEl.textContent = result.error || 'Failed to update coordinates. Please try again.';
+            errorEl.style.display = 'block';
+          }
+        } catch (error) {
+          errorEl.textContent = 'Network error. Please check your connection and try again.';
+          errorEl.style.display = 'block';
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit Location';
+        }
+      }
+
+      // Event listeners for coordinate dialog
+      document.addEventListener('DOMContentLoaded', function() {
+        // Submit button
+        document.getElementById('coordSubmitBtn').addEventListener('click', submitCoordinates);
+
+        // Cancel button
+        document.getElementById('coordCancelBtn').addEventListener('click', hideCoordinateDialog);
+
+        // Click on map button
+        document.getElementById('coordMapPickBtn').addEventListener('click', function() {
+          const statusEl = document.getElementById('coordInputStatus');
+          statusEl.textContent = 'Click anywhere on the map to select a location...';
+          hideCoordinateDialog();
+
+          // Add one-time click handler to map
+          const mapClickHandler = function(e) {
+            document.getElementById('coordInputLat').value = e.latlng.lat.toFixed(6);
+            document.getElementById('coordInputLon').value = e.latlng.lng.toFixed(6);
+            showCoordinateDialog(pendingCoordinateUpdate.trackID, pendingCoordinateUpdate.fileName);
+            map.off('click', mapClickHandler);
+          };
+
+          map.once('click', mapClickHandler);
+        });
+
+        // Use current location button
+        document.getElementById('coordCurrentBtn').addEventListener('click', function() {
+          const errorEl = document.getElementById('coordInputError');
+
+          if ('geolocation' in navigator) {
+            errorEl.textContent = 'Getting your location...';
+            errorEl.style.color = 'var(--isotope-highlight)';
+            errorEl.style.display = 'block';
+
+            navigator.geolocation.getCurrentPosition(
+              function(position) {
+                document.getElementById('coordInputLat').value = position.coords.latitude.toFixed(6);
+                document.getElementById('coordInputLon').value = position.coords.longitude.toFixed(6);
+                errorEl.style.display = 'none';
+              },
+              function(error) {
+                errorEl.textContent = 'Could not get your location: ' + error.message;
+                errorEl.style.color = '#f44336';
+              }
+            );
+          } else {
+            errorEl.textContent = 'Geolocation is not supported by your browser.';
+            errorEl.style.color = '#f44336';
+            errorEl.style.display = 'block';
+          }
+        });
+
+        // Close dialog on Escape key
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape' && document.getElementById('coordinateInputDialog').style.display === 'flex') {
+            hideCoordinateDialog();
+          }
+        });
+      });
+    </script>
 
     <!-- Theme toggle script -->
     <script>
