@@ -1517,6 +1517,30 @@ body, html {
         <p id="spectrumChartEmpty" class="live-chart-empty"></p>
       </div>
     </div>
+    <div id="spectrumIsotopes" style="margin-top: 16px; padding: 12px; background: var(--control-bg); border: var(--legend-border); border-radius: 8px;">
+      <h4 style="margin: 0 0 8px 0; font-size: var(--font-size-base); font-weight: 600; color: var(--modal-text);">Identified Isotopes</h4>
+      <div id="spectrumIsotopeList" style="display: grid; gap: 8px; font-size: var(--font-size-sm);">
+        <!-- Placeholder isotope entries - will be populated dynamically -->
+        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--modal-text);">Ba-133</span>
+          <span style="color: var(--modal-text); opacity: 0.75;">Barium-133</span>
+          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">356 keV, 81 keV</span>
+        </div>
+        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--modal-text);">Cs-137</span>
+          <span style="color: var(--modal-text); opacity: 0.75;">Cesium-137</span>
+          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">662 keV</span>
+        </div>
+        <div style="padding: 6px 8px; background: var(--modal-bg); border-radius: 4px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-weight: 600; color: var(--modal-text);">Co-60</span>
+          <span style="color: var(--modal-text); opacity: 0.75;">Cobalt-60</span>
+          <span style="margin-left: auto; font-family: monospace; color: var(--modal-text);">1173 keV, 1332 keV</span>
+        </div>
+      </div>
+      <p style="margin: 8px 0 0 0; font-size: var(--font-size-xs); color: var(--modal-text); opacity: 0.6; font-style: italic;">
+        Peak identification is for demonstration purposes. Actual isotope identification requires calibration and analysis.
+      </p>
+    </div>
     <div style="margin-top: 16px; text-align: center;">
       <button id="spectrumDownloadJSON" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download JSON</button>
       <button id="spectrumDownloadCSV" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download CSV</button>
