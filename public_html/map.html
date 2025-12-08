@@ -1011,7 +1011,7 @@ body, html {
           filter: grayscale(1) brightness(1) contrast(1);
         }
 
-        #liveModal {
+        #liveModal, #spectrumModal {
           display: none;
           position: fixed;
           top: 0;
@@ -1494,6 +1494,34 @@ body, html {
       </div>
     </div>
     <button type="button" class="live-modal-close" id="liveModalClose"></button>
+  </div>
+</div>
+
+<div id="spectrumModal">
+  <div class="live-modal-content">
+    <div class="live-modal-header">
+      <div style="font-size: 40px; line-height: 1;">📊</div>
+      <div>
+        <h3 id="spectrumModalTitle" class="live-modal-title">Gamma Spectrum</h3>
+        <p id="spectrumModalDescription" class="live-modal-description"></p>
+      </div>
+    </div>
+    <div id="spectrumModalMeta" class="live-modal-meta"></div>
+    <div class="live-chart-stack">
+      <div class="live-chart-block">
+        <h4 class="live-chart-title">
+          <span class="live-chart-label">Energy Spectrum</span>
+          <span class="live-chart-unit">Counts</span>
+        </h4>
+        <canvas id="spectrumChart" class="live-chart-canvas"></canvas>
+        <p id="spectrumChartEmpty" class="live-chart-empty"></p>
+      </div>
+    </div>
+    <div style="margin-top: 16px; text-align: center;">
+      <button id="spectrumDownloadJSON" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download JSON</button>
+      <button id="spectrumDownloadCSV" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download CSV</button>
+    </div>
+    <button type="button" class="live-modal-close" id="spectrumModalClose">Close</button>
   </div>
 </div>
 
@@ -3048,12 +3076,11 @@ function updateMarkers(){
           icon: L.divIcon({className:'', html: html, iconSize:[size, size], iconAnchor:[size/2, size/2]})
         })
         .addTo(map)
-        .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
-        .bindPopup(getPopupContent(m));
+        .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true });
 
-        // Load spectrum data when popup opens
-        marker.on('popupopen', function() {
-          loadAndRenderSpectrum(m.id);
+        // Open spectrum modal on click
+        marker.on('click', function() {
+          openSpectrumModal(m.id, m);
         });
       } else {
         // Regular markers: use circleMarker
@@ -3913,7 +3940,205 @@ async function openLiveModal(deviceID, fallback) {
   }
 }
 
+// Spectrum Modal Functions
+function hideSpectrumModal() {
+  const modal = document.getElementById('spectrumModal');
+  if (modal) modal.style.display = 'none';
+}
 
+async function openSpectrumModal(markerID, fallbackMarker) {
+  const modal = document.getElementById('spectrumModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  const titleEl = document.getElementById('spectrumModalTitle');
+  const descEl = document.getElementById('spectrumModalDescription');
+  const metaEl = document.getElementById('spectrumModalMeta');
+  const closeBtn = document.getElementById('spectrumModalClose');
+  const emptyEl = document.getElementById('spectrumChartEmpty');
+  const canvas = document.getElementById('spectrumChart');
+
+  if (titleEl) titleEl.textContent = 'Gamma Spectrum';
+  if (descEl) descEl.textContent = 'Energy spectrum from scintillator detector';
+  if (emptyEl) { emptyEl.textContent = ''; emptyEl.style.display = 'none'; }
+
+  // Set up download buttons
+  const jsonBtn = document.getElementById('spectrumDownloadJSON');
+  const csvBtn = document.getElementById('spectrumDownloadCSV');
+  if (jsonBtn) {
+    jsonBtn.onclick = function() { downloadSpectrum(markerID, 'json'); };
+  }
+  if (csvBtn) {
+    csvBtn.onclick = function() { downloadSpectrum(markerID, 'csv'); };
+  }
+
+  // Build metadata
+  if (metaEl && fallbackMarker) {
+    const parts = [];
+    parts.push(`<div><strong>Dose Rate:</strong> ${(fallbackMarker.doseRate * 100).toFixed(2)} µR/h (${fallbackMarker.doseRate.toFixed(2)} µSv/h)</div>`);
+    if (fallbackMarker.date) {
+      const date = new Date(fallbackMarker.date * 1000);
+      parts.push(`<div><strong>Captured:</strong> ${date.toLocaleString()}</div>`);
+    }
+    if (fallbackMarker.trackID) {
+      parts.push(`<div><strong>Track ID:</strong> ${fallbackMarker.trackID}</div>`);
+    }
+    metaEl.innerHTML = parts.join('');
+  }
+
+  // Clear canvas
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Fetch and draw spectrum
+  try {
+    const spectrum = await fetchSpectrum(markerID);
+    if (spectrum && canvas) {
+      drawSpectrumChart(canvas, spectrum);
+    } else if (emptyEl) {
+      emptyEl.textContent = 'No spectrum data available';
+      emptyEl.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('Error loading spectrum:', err);
+    if (emptyEl) {
+      emptyEl.textContent = 'Error loading spectrum data';
+      emptyEl.style.display = 'block';
+    }
+  }
+}
+
+function drawSpectrumChart(canvas, spectrum) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (width === 0 || height === 0) return;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const colors = chartColors();
+  canvas.style.background = colors.background;
+
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  const maxCount = Math.max(...spectrum.channels);
+  const maxEnergy = Math.max(...energies);
+
+  // Define plot area with padding (similar to drawLiveChart)
+  const leftPad = 70;
+  const rightPad = 20;
+  const topPad = 20;
+  const bottomPad = 44;
+
+  const plotLeft = leftPad;
+  const plotRight = width - rightPad;
+  const plotTop = topPad;
+  const plotBottom = height - bottomPad;
+  const plotW = Math.max(plotRight - plotLeft, 10);
+  const plotH = Math.max(plotBottom - plotTop, 10);
+
+  // Data ranges
+  const minX = 0;
+  const maxX = maxEnergy;
+  const minY = 0;
+  const maxY = maxCount;
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+
+  // Draw axes
+  ctx.strokeStyle = colors.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(plotLeft, plotTop);
+  ctx.lineTo(plotLeft, plotBottom);
+  ctx.lineTo(plotRight, plotBottom);
+  ctx.stroke();
+
+  const fontTokens = resolveFontTokens();
+  const fonts = {
+    axisY: fontTokens.sm + ' ' + fontTokens.family,
+    axisX: fontTokens.xs + ' ' + fontTokens.family,
+    label: fontTokens.base + ' ' + fontTokens.family,
+  };
+
+  // Draw Y-axis (Counts) ticks and labels
+  const ticksY = niceTicks(minY, maxY, 5);
+  ctx.font = fonts.axisY;
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ticksY.forEach(function(value) {
+    if (!isFinite(value)) return;
+    const y = plotBottom - ((value - minY) / rangeY) * plotH;
+    // Draw grid line
+    ctx.strokeStyle = colorWithAlpha(colors.grid, 0.5);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+    // Draw label
+    ctx.fillStyle = colors.text;
+    ctx.fillText(Math.round(value).toString(), plotLeft - 8, y);
+  });
+
+  // Draw X-axis (Energy keV) ticks and labels
+  const ticksX = niceTicks(minX, maxX, 6);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = fonts.axisX;
+  const axisLabelY = height - 12;
+  ticksX.forEach(function(value) {
+    if (!isFinite(value)) return;
+    const x = plotLeft + ((value - minX) / rangeX) * plotW;
+    // Draw grid line
+    ctx.strokeStyle = colorWithAlpha(colors.grid, 0.35);
+    ctx.beginPath();
+    ctx.moveTo(x, plotTop);
+    ctx.lineTo(x, plotBottom);
+    ctx.stroke();
+    // Draw label
+    ctx.fillStyle = colors.text;
+    ctx.fillText(Math.round(value).toString(), x, plotBottom + 4);
+  });
+
+  // Draw axis label (Energy keV)
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'center';
+  ctx.font = fonts.axisX;
+  ctx.fillText('Energy (keV)', plotLeft + plotW / 2, axisLabelY);
+
+  // Draw spectrum line
+  ctx.strokeStyle = colors.line;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+
+  for (let i = 0; i < spectrum.channels.length; i++) {
+    const energy = energies[i];
+    const count = spectrum.channels[i];
+    const x = plotLeft + ((energy - minX) / rangeX) * plotW;
+    const y = plotBottom - ((count - minY) / rangeY) * plotH;
+
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+}
 
 
 let debounceTimeout;
@@ -4981,6 +5206,18 @@ function centerMapToLocation() {
     var liveClose = document.getElementById('liveModalClose');
     if (liveClose) {
       liveClose.addEventListener('click', function(){ hideLiveModal(); });
+    }
+
+    // Spectrum modal event listeners
+    var spectrumModal = document.getElementById('spectrumModal');
+    if (spectrumModal) {
+      spectrumModal.addEventListener('click', function(e){
+        if (e.target === spectrumModal) hideSpectrumModal();
+      });
+    }
+    var spectrumClose = document.getElementById('spectrumModalClose');
+    if (spectrumClose) {
+      spectrumClose.addEventListener('click', function(){ hideSpectrumModal(); });
     }
   })();
 </script>
