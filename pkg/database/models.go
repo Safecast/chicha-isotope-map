@@ -99,6 +99,7 @@ type Spectrum struct {
 	DeviceModel   string             `json:"deviceModel"`         // Detector model (e.g., "RadiaCode-102", "AtomFast")
 	Calibration   *EnergyCalibration `json:"calibration"`         // Energy calibration coefficients for channel-to-energy conversion
 	SourceFormat  string             `json:"sourceFormat"`        // Original file format ("rctrk", "n42", etc.)
+	Filename      string             `json:"filename,omitempty"`  // Original uploaded filename
 	RawData       []byte             `json:"-"`                   // Original spectrum file bytes for re-export
 	CreatedAt     int64              `json:"createdAt,omitempty"` // Timestamp when spectrum was stored
 }

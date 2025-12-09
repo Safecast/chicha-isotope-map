@@ -5062,7 +5062,7 @@ function centerMapToLocation() {
                   serverProcessing.innerText = '⚠ Needs location';
                   serverProcessing.style.color = 'orange';
                   // Show coordinate input dialog after all uploads complete
-                  pendingCoordinateUpdate = { trackID: response.trackID, fileName: file.name };
+                  pendingCoordinateUpdate = { trackID: response.trackID, fileName: file.name, trackURL: response.trackURL };
                 }
               } else if (response.status === 'processing') {
                 lastTrackURL               = null;
@@ -5086,7 +5086,7 @@ function centerMapToLocation() {
 
                 // Show coordinate dialog if needed, otherwise redirect
                 if (pendingCoordinateUpdate) {
-                  showCoordinateDialog(pendingCoordinateUpdate.trackID, pendingCoordinateUpdate.fileName);
+                  showCoordinateDialog(pendingCoordinateUpdate.trackID, pendingCoordinateUpdate.fileName, pendingCoordinateUpdate.trackURL);
                 } else if (lastTrackURL) {
                   window.location.href = lastTrackURL;
                 } else {
@@ -5108,8 +5108,8 @@ function centerMapToLocation() {
     <script>
       let pendingCoordinateUpdate = null;
 
-      function showCoordinateDialog(trackID, fileName) {
-        pendingCoordinateUpdate = { trackID, fileName };
+      function showCoordinateDialog(trackID, fileName, trackURL) {
+        pendingCoordinateUpdate = { trackID, fileName, trackURL };
         const dialog = document.getElementById('coordinateInputDialog');
         const statusEl = document.getElementById('coordInputStatus');
         const errorEl = document.getElementById('coordInputError');
@@ -5186,10 +5186,16 @@ function centerMapToLocation() {
           const result = await response.json();
 
           if (response.ok && result.status === 'success') {
-            // Success! Navigate to the updated markers
+            // Success! Navigate to the track page
+            const trackURL = pendingCoordinateUpdate ? pendingCoordinateUpdate.trackURL : null;
             hideCoordinateDialog();
-            const zoom = 15;
-            window.location.href = `/#${zoom}/${lat}/${lon}`;
+            if (trackURL) {
+              window.location.href = trackURL;
+            } else {
+              // Fallback to map location if trackURL is not available
+              const zoom = 15;
+              window.location.href = `/#${zoom}/${lat}/${lon}`;
+            }
           } else {
             errorEl.textContent = result.error || 'Failed to update coordinates. Please try again.';
             errorEl.style.display = 'block';
@@ -5215,13 +5221,16 @@ function centerMapToLocation() {
         document.getElementById('coordMapPickBtn').addEventListener('click', function() {
           const statusEl = document.getElementById('coordInputStatus');
           statusEl.textContent = 'Click anywhere on the map to select a location...';
+
+          // Store current pending update before hiding dialog
+          const currentUpdate = pendingCoordinateUpdate;
           hideCoordinateDialog();
 
           // Add one-time click handler to map
           const mapClickHandler = function(e) {
             document.getElementById('coordInputLat').value = e.latlng.lat.toFixed(6);
             document.getElementById('coordInputLon').value = e.latlng.lng.toFixed(6);
-            showCoordinateDialog(pendingCoordinateUpdate.trackID, pendingCoordinateUpdate.fileName);
+            showCoordinateDialog(currentUpdate.trackID, currentUpdate.fileName, currentUpdate.trackURL);
             map.off('click', mapClickHandler);
           };
 

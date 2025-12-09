@@ -1498,11 +1498,25 @@ CREATE TABLE IF NOT EXISTS spectra (
   device_model    TEXT,
   calibration     TEXT,
   source_format   TEXT,
+  filename        TEXT,
   raw_data        BYTEA,
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
+
+CREATE TABLE IF NOT EXISTS uploads (
+  id              BIGSERIAL PRIMARY KEY,
+  filename        TEXT NOT NULL,
+  file_type       TEXT,
+  track_id        TEXT,
+  file_size       BIGINT,
+  upload_ip       TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
 `
 
 	case "sqlite", "chai":
@@ -1578,11 +1592,24 @@ CREATE TABLE IF NOT EXISTS spectra (
   device_model    TEXT,
   calibration     TEXT,
   source_format   TEXT,
+  filename        TEXT,
   raw_data        BLOB,
   created_at      BIGINT NOT NULL,
   FOREIGN KEY (marker_id) REFERENCES markers(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
+
+CREATE TABLE IF NOT EXISTS uploads (
+  id              INTEGER PRIMARY KEY,
+  filename        TEXT NOT NULL,
+  file_type       TEXT,
+  track_id        TEXT,
+  file_size       INTEGER,
+  upload_ip       TEXT,
+  created_at      BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
 `
 
 	case "duckdb":
@@ -1663,11 +1690,25 @@ CREATE TABLE IF NOT EXISTS spectra (
   device_model    TEXT,
   calibration     TEXT,
   source_format   TEXT,
+  filename        TEXT,
   raw_data        BLOB,
   created_at      TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (marker_id) REFERENCES markers(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_spectra_marker_id ON spectra(marker_id);
+
+CREATE SEQUENCE IF NOT EXISTS uploads_id_seq START 1;
+CREATE TABLE IF NOT EXISTS uploads (
+  id              BIGINT PRIMARY KEY DEFAULT nextval('uploads_id_seq'),
+  filename        TEXT NOT NULL,
+  file_type       TEXT,
+  track_id        TEXT,
+  file_size       BIGINT,
+  upload_ip       TEXT,
+  created_at      TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
 `
 
 	case "clickhouse":

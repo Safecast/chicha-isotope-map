@@ -3995,7 +3995,10 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if bbox != (database.Bounds{}) {
+		// Check if bbox was calculated from markers (not the initial empty state)
+		// Initial state is {MinLat: 90, MinLon: 180, MaxLat: -90, MaxLon: -180}
+		// Even {0,0,0,0} means markers were processed (spectrum files without GPS)
+		if bbox.MinLat != 90 || bbox.MaxLat != -90 || bbox.MinLon != 180 || bbox.MaxLon != -180 {
 			hasBounds = true
 			// расширяем глобальные границы
 			if bbox.MinLat < global.MinLat {

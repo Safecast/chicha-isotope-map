@@ -54,7 +54,8 @@ func parseSPEFile(data []byte) (*SPEFile, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	var currentSection string
 	var dataStart, dataEnd int
-	var dataLines []string
+	var dataLines []string // Lines from $DATA section
+	var calLines []string  // Lines from $MCA_CAL section
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -67,7 +68,6 @@ func parseSPEFile(data []byte) (*SPEFile, error) {
 		// Check for section markers
 		if strings.HasPrefix(line, "$") {
 			currentSection = line
-			dataLines = make([]string, 0) // Reset data lines for new section
 			continue
 		}
 
@@ -89,7 +89,6 @@ func parseSPEFile(data []byte) (*SPEFile, error) {
 			spe.DateMea = line
 
 		case "$MEAS_TIM:":
-			dataLines = append(dataLines, line)
 			// Parse measurement timing (typically two values: live_time real_time)
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
@@ -122,11 +121,10 @@ func parseSPEFile(data []byte) (*SPEFile, error) {
 		case "$MCA_CAL:":
 			// First line is number of coefficients
 			// Following lines are the coefficients
-			dataLines = append(dataLines, line)
+			calLines = append(calLines, line)
 
 		case "$ENER_FIT:":
-			// Energy fitting parameters
-			dataLines = append(dataLines, line)
+			// Energy fitting parameters (not currently used)
 		}
 	}
 
@@ -139,7 +137,7 @@ func parseSPEFile(data []byte) (*SPEFile, error) {
 		return nil, err
 	}
 
-	if err := parseSPECalibration(spe, dataLines); err != nil {
+	if err := parseSPECalibration(spe, calLines); err != nil {
 		// Non-fatal: use default calibration if parsing fails
 		fmt.Printf("SPE Debug: Could not parse calibration, using defaults: %v\n", err)
 	}
