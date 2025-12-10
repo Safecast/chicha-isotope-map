@@ -4753,9 +4753,12 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
 		h1 { color: var(--text-primary); }
-		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
-		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); display: flex; justify-content: space-between; align-items: center; }
+		.nav-left { display: flex; align-items: center; gap: 15px; }
+		.nav a { color: var(--link-color); text-decoration: none; }
 		.nav a:hover { text-decoration: underline; }
+		.back-to-map-btn { background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
+		.back-to-map-btn:hover { background: #1976D2; }
 		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
 		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
 		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
@@ -4772,14 +4775,24 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		.delete-selected-btn:hover { background: #d32f2f; }
 		.delete-selected-btn:disabled { background: #ccc; cursor: not-allowed; }
 		.checkbox-col { width: 40px; text-align: center; }
+		.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 20px; }
+		.sortable:hover { background: rgba(255,255,255,0.1); }
+		.sortable::after { content: '⇅'; position: absolute; right: 8px; opacity: 0.5; }
+		.sortable.asc::after { content: '▲'; opacity: 1; }
+		.sortable.desc::after { content: '▼'; opacity: 1; }
+		.filter-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 0.85em; box-sizing: border-box; }
+		.filter-row th { background: var(--bg-card); padding: 8px 12px; }
 	</style>
 </head>
 <body>
 	<h1>📁 File Uploads Administration</h1>
 	<div class="nav">
-		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
-		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
-		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		<div class="nav-left">
+			<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+			<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+			<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		</div>
+		<a href="/" class="back-to-map-btn">🗺️ Back to Map</a>
 	</div>
 	<div class="summary">
 		<strong>Total Uploads:</strong> ` + strconv.Itoa(len(uploads)) + ` files (showing up to ` + strconv.Itoa(limit) + `)
@@ -4789,21 +4802,32 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		html += `<div class="empty">No uploads found. Upload a spectrum file (.n42 or .spe) to see it appear here.</div>`
 	} else {
 		html += `
-	<table>
+	<table id="uploadsTable">
 		<thead>
 			<tr>
 				<th class="checkbox-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
-				<th>ID</th>
-				<th>Filename</th>
-				<th>Type</th>
-				<th>Track ID</th>
-				<th>Size</th>
-				<th>Upload IP</th>
-				<th>Upload Time</th>
+				<th class="sortable" onclick="sortTable(1)" data-type="number">ID</th>
+				<th class="sortable" onclick="sortTable(2)" data-type="text">Filename</th>
+				<th class="sortable" onclick="sortTable(3)" data-type="text">Type</th>
+				<th class="sortable" onclick="sortTable(4)" data-type="text">Track ID</th>
+				<th class="sortable" onclick="sortTable(5)" data-type="text">Size</th>
+				<th class="sortable" onclick="sortTable(6)" data-type="text">Upload IP</th>
+				<th class="sortable" onclick="sortTable(7)" data-type="date">Upload Time</th>
 				<th>Actions</th>
 			</tr>
+			<tr class="filter-row">
+				<th></th>
+				<th><input type="text" class="filter-input" placeholder="ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter filename..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Type..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Size..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="IP..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th></th>
+			</tr>
 		</thead>
-		<tbody>`
+		<tbody id="uploadsTableBody">`
 
 		for _, upload := range uploads {
 			uploadTime := time.Unix(upload.CreatedAt, 0).Format("2006-01-02 15:04:05")
@@ -4915,6 +4939,87 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			})
 			.catch(err => alert('Error: ' + err));
+		}
+
+		// Sorting functionality
+		let sortDirection = {};
+		function sortTable(columnIndex) {
+			const table = document.getElementById('uploadsTable');
+			const tbody = document.getElementById('uploadsTableBody');
+			const rows = Array.from(tbody.querySelectorAll('tr'));
+			const header = table.querySelector('thead tr:first-child th:nth-child(' + (columnIndex + 1) + ')');
+			const dataType = header.getAttribute('data-type');
+
+			// Toggle sort direction
+			const currentDir = sortDirection[columnIndex] || 'none';
+			sortDirection[columnIndex] = currentDir === 'asc' ? 'desc' : 'asc';
+
+			// Remove sort classes from all headers
+			table.querySelectorAll('.sortable').forEach(h => {
+				h.classList.remove('asc', 'desc');
+			});
+
+			// Add sort class to current header
+			header.classList.add(sortDirection[columnIndex]);
+
+			// Sort rows
+			rows.sort((a, b) => {
+				let aVal = a.cells[columnIndex].textContent.trim();
+				let bVal = b.cells[columnIndex].textContent.trim();
+
+				// Numeric comparison
+				if (dataType === 'number') {
+					aVal = parseInt(aVal) || 0;
+					bVal = parseInt(bVal) || 0;
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Date comparison
+				if (dataType === 'date') {
+					aVal = new Date(aVal).getTime();
+					bVal = new Date(bVal).getTime();
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Text comparison
+				if (sortDirection[columnIndex] === 'asc') {
+					return aVal.localeCompare(bVal);
+				} else {
+					return bVal.localeCompare(aVal);
+				}
+			});
+
+			// Reappend sorted rows
+			rows.forEach(row => tbody.appendChild(row));
+		}
+
+		// Filtering functionality
+		function filterTable() {
+			const table = document.getElementById('uploadsTable');
+			const tbody = document.getElementById('uploadsTableBody');
+			const filters = table.querySelectorAll('.filter-input');
+			const rows = tbody.querySelectorAll('tr');
+
+			rows.forEach(row => {
+				let show = true;
+				filters.forEach((filter, index) => {
+					const filterValue = filter.value.toLowerCase();
+					if (filterValue) {
+						const cellIndex = index + 1; // +1 because first column is checkbox
+						const cell = row.cells[cellIndex];
+						if (cell) {
+							const cellText = cell.textContent.toLowerCase();
+							if (!cellText.includes(filterValue)) {
+								show = false;
+							}
+						}
+					}
+				});
+				row.style.display = show ? '' : 'none';
+			});
+
+			// Update delete button after filtering
+			updateDeleteButton();
 		}
 	</script>
 </body>
@@ -5245,9 +5350,12 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
 		h1 { color: var(--text-primary); }
-		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
-		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); display: flex; justify-content: space-between; align-items: center; }
+		.nav-left { display: flex; align-items: center; gap: 15px; }
+		.nav a { color: var(--link-color); text-decoration: none; }
 		.nav a:hover { text-decoration: underline; }
+		.back-to-map-btn { background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
+		.back-to-map-btn:hover { background: #1976D2; }
 		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
 		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
 		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
@@ -5266,15 +5374,25 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		.backfill-btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 1em; margin-left: 10px; }
 		.backfill-btn:hover { background: #45a049; }
 		.checkbox-col { width: 40px; text-align: center; }
+		.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 20px; }
+		.sortable:hover { background: rgba(255,255,255,0.1); }
+		.sortable::after { content: '⇅'; position: absolute; right: 8px; opacity: 0.5; }
+		.sortable.asc::after { content: '▲'; opacity: 1; }
+		.sortable.desc::after { content: '▼'; opacity: 1; }
+		.filter-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 0.85em; box-sizing: border-box; }
+		.filter-row th { background: var(--bg-card); padding: 8px 12px; }
 	</style>
 </head>
 <body>
 	<h1>🗂️ All Tracks Administration</h1>
 	<div class="nav">
-		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
-		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
-		<button class="backfill-btn" onclick="backfillUploads()">📥 Backfill Upload Records</button>
-		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		<div class="nav-left">
+			<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+			<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+			<button class="backfill-btn" onclick="backfillUploads()">📥 Backfill Upload Records</button>
+			<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		</div>
+		<a href="/" class="back-to-map-btn">🗺️ Back to Map</a>
 	</div>
 	<div class="summary">
 		<strong>Total Tracks:</strong> ` + strconv.Itoa(len(tracks)) + ` (showing up to ` + strconv.Itoa(limit) + `)
@@ -5284,19 +5402,28 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		html += `<div class="empty">No tracks found in the database.</div>`
 	} else {
 		html += `
-	<table>
+	<table id="tracksTable">
 		<thead>
 			<tr>
 				<th class="checkbox-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
-				<th>Track ID</th>
-				<th>Markers</th>
-				<th>Spectra</th>
-				<th>First Point</th>
-				<th>Last Point</th>
+				<th class="sortable" onclick="sortTable(1)" data-type="text">Track ID</th>
+				<th class="sortable" onclick="sortTable(2)" data-type="number">Markers</th>
+				<th class="sortable" onclick="sortTable(3)" data-type="number">Spectra</th>
+				<th class="sortable" onclick="sortTable(4)" data-type="date">First Point</th>
+				<th class="sortable" onclick="sortTable(5)" data-type="date">Last Point</th>
 				<th>Actions</th>
 			</tr>
+			<tr class="filter-row">
+				<th></th>
+				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Min..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Min..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th></th>
+			</tr>
 		</thead>
-		<tbody>`
+		<tbody id="tracksTableBody">`
 
 		for _, track := range tracks {
 			firstDate := time.Unix(track.FirstDate, 0).Format("2006-01-02 15:04")
@@ -5423,6 +5550,87 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			})
 			.catch(err => alert('Error: ' + err));
+		}
+
+		// Sorting functionality
+		let sortDirection = {};
+		function sortTable(columnIndex) {
+			const table = document.getElementById('tracksTable');
+			const tbody = document.getElementById('tracksTableBody');
+			const rows = Array.from(tbody.querySelectorAll('tr'));
+			const header = table.querySelector('thead tr:first-child th:nth-child(' + (columnIndex + 1) + ')');
+			const dataType = header.getAttribute('data-type');
+
+			// Toggle sort direction
+			const currentDir = sortDirection[columnIndex] || 'none';
+			sortDirection[columnIndex] = currentDir === 'asc' ? 'desc' : 'asc';
+
+			// Remove sort classes from all headers
+			table.querySelectorAll('.sortable').forEach(h => {
+				h.classList.remove('asc', 'desc');
+			});
+
+			// Add sort class to current header
+			header.classList.add(sortDirection[columnIndex]);
+
+			// Sort rows
+			rows.sort((a, b) => {
+				let aVal = a.cells[columnIndex].textContent.trim();
+				let bVal = b.cells[columnIndex].textContent.trim();
+
+				// Extract numeric values from badges
+				if (dataType === 'number') {
+					aVal = parseInt(aVal.match(/\d+/) || '0');
+					bVal = parseInt(bVal.match(/\d+/) || '0');
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Date comparison
+				if (dataType === 'date') {
+					aVal = new Date(aVal).getTime();
+					bVal = new Date(bVal).getTime();
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Text comparison
+				if (sortDirection[columnIndex] === 'asc') {
+					return aVal.localeCompare(bVal);
+				} else {
+					return bVal.localeCompare(aVal);
+				}
+			});
+
+			// Reappend sorted rows
+			rows.forEach(row => tbody.appendChild(row));
+		}
+
+		// Filtering functionality
+		function filterTable() {
+			const table = document.getElementById('tracksTable');
+			const tbody = document.getElementById('tracksTableBody');
+			const filters = table.querySelectorAll('.filter-input');
+			const rows = tbody.querySelectorAll('tr');
+
+			rows.forEach(row => {
+				let show = true;
+				filters.forEach((filter, index) => {
+					const filterValue = filter.value.toLowerCase();
+					if (filterValue) {
+						const cellIndex = index + 1; // +1 because first column is checkbox
+						const cell = row.cells[cellIndex];
+						if (cell) {
+							const cellText = cell.textContent.toLowerCase();
+							if (!cellText.includes(filterValue)) {
+								show = false;
+							}
+						}
+					}
+				});
+				row.style.display = show ? '' : 'none';
+			});
+
+			// Update delete button after filtering
+			updateDeleteButton();
 		}
 	</script>
 </body>
