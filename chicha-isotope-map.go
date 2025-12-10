@@ -57,6 +57,7 @@ import (
 	"chicha-isotope-map/pkg/qrlogoext"
 	safecastrealtime "chicha-isotope-map/pkg/safecast-realtime"
 	"chicha-isotope-map/pkg/selfupgrade"
+	"chicha-isotope-map/pkg/spectrum"
 )
 
 // content bundles the UI and the license texts so single-file binaries still
@@ -87,6 +88,7 @@ var importTGZURLFlag = flag.String("import-tgz-url", "", "Download and import a 
 var importTGZFileFlag = flag.String("import-tgz-file", "", "Import a local .tgz of exported JSON files, log progress, and exit once finished.")
 var supportEmail = flag.String("support-email", "", "Contact e-mail shown in the legal notice for feedback")
 var debugIPsFlag = flag.String("debug", "", "Comma separated IP addresses allowed to view the debug overlay")
+var adminPassword = flag.String("admin-password", "", "Password for admin endpoints (upload listing, track deletion). If not set, admin endpoints are disabled.")
 
 // debugIPAllowlist keeps a fast lookup of remote addresses that should see the
 // technical overlay. We keep it as a map so lookups stay O(1) without extra
@@ -2498,6 +2500,224 @@ func processRCTRKFile(
 	return processAndStoreMarkers(markers, trackID, db, dbType)
 }
 
+// processN42File handles ANSI N42.42 XML files with gamma spectrum data.
+func processN42File(
+	file multipart.File,
+	filename string,
+	trackID string,
+	db *database.Database,
+	dbType string,
+) (database.Bounds, string, error) {
+	logT(trackID, "N42", "▶ start")
+
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("read N42: %w", err)
+	}
+
+	// Parse N42 file to extract spectra and markers
+	spectra, markers, err := spectrum.ParseN42(raw)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("parse N42: %w", err)
+	}
+
+	logT(trackID, "N42", "parsed %d spectra, %d markers", len(spectra), len(markers))
+
+	if len(markers) == 0 {
+		return database.Bounds{}, trackID, fmt.Errorf("no markers found in N42 file")
+	}
+
+	// Set trackID for all markers
+	for i := range markers {
+		if markers[i].TrackID == "" {
+			markers[i].TrackID = trackID
+		}
+	}
+
+	// Store markers and get their IDs
+	bounds, storedTrackID, err := processAndStoreMarkers(markers, trackID, db, dbType)
+	if err != nil {
+		return bounds, storedTrackID, fmt.Errorf("store markers: %w", err)
+	}
+
+	// Get the marker IDs from database to link spectra
+	ctx := context.Background()
+	for i := range spectra {
+		// Find the corresponding marker by matching coordinates and timestamp
+		// For simplicity, we'll assume the order is preserved
+		if i < len(markers) {
+			// Query for ALL marker IDs with this location and timestamp (across all zoom levels)
+			query := "SELECT id FROM markers WHERE lat = ? AND lon = ? AND date = ?"
+			args := []interface{}{markers[i].Lat, markers[i].Lon, markers[i].Date}
+
+			if dbType == "pgx" {
+				query = "SELECT id FROM markers WHERE lat = $1 AND lon = $2 AND date = $3"
+			}
+
+			rows, err := db.DB.QueryContext(ctx, query, args...)
+			if err != nil {
+				logT(trackID, "N42", "warning: could not query markers for spectrum %d: %v", i, err)
+				continue
+			}
+
+			var markerIDs []int64
+			for rows.Next() {
+				var mid int64
+				if err := rows.Scan(&mid); err != nil {
+					logT(trackID, "N42", "warning: failed to scan marker ID: %v", err)
+					continue
+				}
+				markerIDs = append(markerIDs, mid)
+			}
+			rows.Close()
+
+			if len(markerIDs) == 0 {
+				logT(trackID, "N42", "warning: no markers found for spectrum %d", i)
+				continue
+			}
+
+			// Insert spectrum using the first marker ID (typically zoom=0)
+			spectra[i].MarkerID = markerIDs[0]
+			spectra[i].RawData = raw // Store original N42 file
+			spectra[i].Filename = filename
+
+			spectrumID, err := db.InsertSpectrum(ctx, spectra[i])
+			if err != nil {
+				logT(trackID, "N42", "warning: failed to insert spectrum %d: %v", i, err)
+				continue
+			}
+
+			// Update has_spectrum flag for ALL markers at this location/time (all zoom levels)
+			updateQuery := "UPDATE markers SET has_spectrum = ? WHERE lat = ? AND lon = ? AND date = ?"
+			updateArgs := []interface{}{true, markers[i].Lat, markers[i].Lon, markers[i].Date}
+			if dbType == "pgx" {
+				updateQuery = "UPDATE markers SET has_spectrum = $1 WHERE lat = $2 AND lon = $3 AND date = $4"
+			}
+
+			result, err := db.DB.ExecContext(ctx, updateQuery, updateArgs...)
+			if err != nil {
+				logT(trackID, "N42", "warning: failed to update has_spectrum flags: %v", err)
+			} else {
+				if count, _ := result.RowsAffected(); count > 0 {
+					logT(trackID, "N42", "inserted spectrum %d for marker %d (updated %d zoom levels)", spectrumID, markerIDs[0], count)
+				}
+			}
+		}
+	}
+
+	logT(trackID, "N42", "✓ complete")
+	return bounds, storedTrackID, nil
+}
+
+// processSPEFile handles IAEA SPE format files with gamma spectrum data.
+func processSPEFile(
+	file multipart.File,
+	filename string,
+	trackID string,
+	db *database.Database,
+	dbType string,
+) (database.Bounds, string, error) {
+	logT(trackID, "SPE", "▶ start")
+
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("read SPE: %w", err)
+	}
+
+	// Parse SPE file to extract spectra and markers
+	spectra, markers, err := spectrum.ParseSPE(raw)
+	if err != nil {
+		return database.Bounds{}, trackID, fmt.Errorf("parse SPE: %w", err)
+	}
+
+	logT(trackID, "SPE", "parsed %d spectra, %d markers", len(spectra), len(markers))
+
+	if len(markers) == 0 {
+		return database.Bounds{}, trackID, fmt.Errorf("no markers found in SPE file")
+	}
+
+	// Set trackID for all markers
+	for i := range markers {
+		if markers[i].TrackID == "" {
+			markers[i].TrackID = trackID
+		}
+	}
+
+	// Store markers and get their IDs
+	bounds, storedTrackID, err := processAndStoreMarkers(markers, trackID, db, dbType)
+	if err != nil {
+		return bounds, storedTrackID, fmt.Errorf("store markers: %w", err)
+	}
+
+	// Get the marker IDs from database to link spectra
+	ctx := context.Background()
+	for i := range spectra {
+		// Find the corresponding marker by matching coordinates and timestamp
+		// For simplicity, we'll assume the order is preserved
+		if i < len(markers) {
+			// Query for ALL marker IDs with this location and timestamp (across all zoom levels)
+			query := "SELECT id FROM markers WHERE lat = ? AND lon = ? AND date = ?"
+			args := []interface{}{markers[i].Lat, markers[i].Lon, markers[i].Date}
+
+			if dbType == "pgx" {
+				query = "SELECT id FROM markers WHERE lat = $1 AND lon = $2 AND date = $3"
+			}
+
+			rows, err := db.DB.QueryContext(ctx, query, args...)
+			if err != nil {
+				logT(trackID, "SPE", "warning: could not query markers for spectrum %d: %v", i, err)
+				continue
+			}
+
+			var markerIDs []int64
+			for rows.Next() {
+				var mid int64
+				if err := rows.Scan(&mid); err != nil {
+					logT(trackID, "SPE", "warning: failed to scan marker ID: %v", err)
+					continue
+				}
+				markerIDs = append(markerIDs, mid)
+			}
+			rows.Close()
+
+			if len(markerIDs) == 0 {
+				logT(trackID, "SPE", "warning: no markers found for spectrum %d", i)
+				continue
+			}
+
+			// Insert spectrum using the first marker ID (typically zoom=0)
+			spectra[i].MarkerID = markerIDs[0]
+			spectra[i].RawData = raw // Store original SPE file
+			spectra[i].Filename = filename
+
+			spectrumID, err := db.InsertSpectrum(ctx, spectra[i])
+			if err != nil {
+				logT(trackID, "SPE", "warning: failed to insert spectrum %d: %v", i, err)
+				continue
+			}
+
+			// Update has_spectrum flag for ALL markers at this location/time (all zoom levels)
+			updateQuery := "UPDATE markers SET has_spectrum = ? WHERE lat = ? AND lon = ? AND date = ?"
+			updateArgs := []interface{}{true, markers[i].Lat, markers[i].Lon, markers[i].Date}
+			if dbType == "pgx" {
+				updateQuery = "UPDATE markers SET has_spectrum = $1 WHERE lat = $2 AND lon = $3 AND date = $4"
+			}
+
+			result, err := db.DB.ExecContext(ctx, updateQuery, updateArgs...)
+			if err != nil {
+				logT(trackID, "SPE", "warning: failed to update has_spectrum flags: %v", err)
+			} else {
+				if count, _ := result.RowsAffected(); count > 0 {
+					logT(trackID, "SPE", "inserted spectrum %d for marker %d (updated %d zoom levels)", spectrumID, markerIDs[0], count)
+				}
+			}
+		}
+	}
+
+	logT(trackID, "SPE", "✓ complete")
+	return bounds, storedTrackID, nil
+}
+
 // processAtomFastFile handles Atom Fast JSON export (*.json).
 func processAtomFastFile(
 	file multipart.File,
@@ -3676,6 +3896,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	global := database.Bounds{MinLat: 90, MinLon: 180, MaxLat: -90, MaxLon: -180}
 	hasBounds := false
 	backgroundImport := false
+	isSpectrumUpload := false
 
 	for _, fh := range files {
 		logT(trackID, "Upload", "file received: %s", fh.Filename)
@@ -3699,6 +3920,12 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			bbox, trackID, err = processAtomSwiftCSVFile(f, trackID, db, *dbType)
 		case ".rctrk":
 			bbox, trackID, err = processRCTRKFile(f, trackID, db, *dbType)
+		case ".n42":
+			isSpectrumUpload = true
+			bbox, trackID, err = processN42File(f, fh.Filename, trackID, db, *dbType)
+		case ".spe":
+			isSpectrumUpload = true
+			bbox, trackID, err = processSPEFile(f, fh.Filename, trackID, db, *dbType)
 		case ".cim":
 			var imported bool
 			bbox, trackID, imported, err = processTrackExportFile(r.Context(), f, trackID, db, *dbType)
@@ -3776,7 +4003,27 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if bbox != (database.Bounds{}) {
+		// Track successful upload in database
+		clientIP := r.RemoteAddr
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			clientIP = forwarded
+		}
+		upload := database.Upload{
+			Filename:  fh.Filename,
+			FileType:  ext,
+			TrackID:   trackID,
+			FileSize:  fh.Size,
+			UploadIP:  clientIP,
+			CreatedAt: 0, // Will be set to current time by InsertUpload
+		}
+		if _, uploadErr := db.InsertUpload(r.Context(), upload); uploadErr != nil {
+			logT(trackID, "Upload", "warning: failed to track upload: %v", uploadErr)
+		}
+
+		// Check if bbox was calculated from markers (not the initial empty state)
+		// Initial state is {MinLat: 90, MinLon: 180, MaxLat: -90, MaxLon: -180}
+		// Even {0,0,0,0} means markers were processed (spectrum files without GPS)
+		if bbox.MinLat != 90 || bbox.MaxLat != -90 || bbox.MinLon != 180 || bbox.MaxLon != -180 {
 			hasBounds = true
 			// расширяем глобальные границы
 			if bbox.MinLat < global.MinLat {
@@ -3794,12 +4041,24 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check if markers are at 0,0 (spectrum files without GPS coordinates)
+	needsCoordinates := false
+	if hasBounds && global.MinLat == 0 && global.MaxLat == 0 && global.MinLon == 0 && global.MaxLon == 0 {
+		needsCoordinates = true
+		logT(trackID, "Upload", "spectrum file uploaded without GPS coordinates - needs manual location")
+	}
+
 	trackURL := "/"
-	if hasBounds {
+	if hasBounds && !needsCoordinates {
+		// Only include bbox parameters if we have valid coordinates (not 0,0,0,0)
 		trackURL = fmt.Sprintf(
-			"/trackid/%s?minLat=%f&minLon=%f&maxLat=%f&maxLon=%f&zoom=14&layer=%s",
+			"/trackid/%s?minLat=%f&minLon=%f&maxLat=%f&maxLon=%f&zoom=18&layer=%s",
 			trackID, global.MinLat, global.MinLon, global.MaxLat, global.MaxLon,
 			"OpenStreetMap")
+	} else if isSpectrumUpload && needsCoordinates {
+		// For spectrum files without coordinates, just go to the trackid page without bbox
+		// This keeps the map at its current position so user can manually add coordinates
+		trackURL = fmt.Sprintf("/trackid/%s", trackID)
 	}
 
 	status := "success"
@@ -3811,10 +4070,18 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	response := map[string]any{
 		"status":   status,
 		"trackURL": trackURL,
-	}); err != nil {
+	}
+
+	// Add trackID and needsCoordinates flag if spectrum needs location
+	if needsCoordinates {
+		response["needsCoordinates"] = true
+		response["trackID"] = trackID
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		if isClientDisconnect(err) {
 			log.Printf("client disconnected while writing upload response")
 		} else {
@@ -4126,6 +4393,1347 @@ func shortRedirectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // =====================
+// API  — Spectrum Data
+// =====================
+
+// spectrumHandler returns spectrum data for a specific marker.
+// GET /api/spectrum/{markerID}
+// GET /api/spectrum/{markerID}/download?format=...
+func spectrumHandler(w http.ResponseWriter, r *http.Request) {
+	// Route to download handler if path contains "download"
+	if strings.Contains(r.URL.Path, "/download") {
+		spectrumDownloadHandler(w, r)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract marker ID from URL path: /api/spectrum/{markerID}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Marker ID not provided", http.StatusBadRequest)
+		return
+	}
+
+	markerID, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid marker ID", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	spectrum, err := db.GetSpectrum(ctx, markerID)
+	if err != nil {
+		log.Printf("Error fetching spectrum for marker %d: %v", markerID, err)
+		http.Error(w, "Error fetching spectrum", http.StatusInternalServerError)
+		return
+	}
+
+	if spectrum == nil {
+		http.Error(w, "No spectrum found for this marker", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(spectrum)
+}
+
+// spectrumDownloadHandler downloads a spectrum file in requested format.
+// GET /api/spectrum/{markerID}/download?format=n42|json|csv
+func spectrumDownloadHandler(w http.ResponseWriter, r *http.Request) {
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract marker ID from URL path: /api/spectrum/{markerID}/download
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Marker ID not provided", http.StatusBadRequest)
+		return
+	}
+
+	markerID, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid marker ID", http.StatusBadRequest)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json" // Default format
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	spectrum, err := db.GetSpectrum(ctx, markerID)
+	if err != nil {
+		log.Printf("Error fetching spectrum for marker %d: %v", markerID, err)
+		http.Error(w, "Error fetching spectrum", http.StatusInternalServerError)
+		return
+	}
+
+	if spectrum == nil {
+		http.Error(w, "No spectrum found for this marker", http.StatusNotFound)
+		return
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.json", markerID))
+		json.NewEncoder(w).Encode(spectrum)
+
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.csv", markerID))
+		// Write CSV: energy, counts
+		fmt.Fprintf(w, "Channel,Energy_keV,Counts\n")
+		for i, count := range spectrum.Channels {
+			energy := 0.0
+			if spectrum.Calibration != nil {
+				ch := float64(i)
+				energy = spectrum.Calibration.A + spectrum.Calibration.B*ch + spectrum.Calibration.C*ch*ch
+			}
+			fmt.Fprintf(w, "%d,%.2f,%d\n", i, energy, count)
+		}
+
+	case "n42":
+		if len(spectrum.RawData) > 0 && spectrum.SourceFormat == "n42" {
+			// Return original N42 file if available
+			w.Header().Set("Content-Type", "application/xml")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.n42", markerID))
+			w.Write(spectrum.RawData)
+		} else {
+			http.Error(w, "N42 format not available for this spectrum", http.StatusNotFound)
+		}
+
+	case "spe":
+		if len(spectrum.RawData) > 0 && spectrum.SourceFormat == "spe" {
+			// Return original SPE file if available
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=spectrum_%d.spe", markerID))
+			w.Write(spectrum.RawData)
+		} else {
+			http.Error(w, "SPE format not available for this spectrum", http.StatusNotFound)
+		}
+
+	default:
+		http.Error(w, fmt.Sprintf("Unsupported format: %s", format), http.StatusBadRequest)
+	}
+}
+
+// markersWithSpectraHandler returns markers that have associated spectral data.
+// GET /api/markers/spectra?minLat=...&maxLat=...&minLon=...&maxLon=...
+func markersWithSpectraHandler(w http.ResponseWriter, r *http.Request) {
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := withMinimumDeadline(r.Context(), 30*time.Second)
+	defer cancel()
+
+	q := r.URL.Query()
+	minLat, _ := strconv.ParseFloat(q.Get("minLat"), 64)
+	minLon, _ := strconv.ParseFloat(q.Get("minLon"), 64)
+	maxLat, _ := strconv.ParseFloat(q.Get("maxLat"), 64)
+	maxLon, _ := strconv.ParseFloat(q.Get("maxLon"), 64)
+
+	// Validate bounds
+	if minLat == 0 && maxLat == 0 && minLon == 0 && maxLon == 0 {
+		// Default to world bounds
+		minLat, maxLat = -90, 90
+		minLon, maxLon = -180, 180
+	}
+
+	bounds := database.Bounds{
+		MinLat: minLat,
+		MaxLat: maxLat,
+		MinLon: minLon,
+		MaxLon: maxLon,
+	}
+
+	markers, err := db.GetMarkersWithSpectra(ctx, bounds)
+	if err != nil {
+		log.Printf("Error fetching markers with spectra: %v", err)
+		http.Error(w, "Error fetching markers", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(markers)
+}
+
+// updateCoordinatesHandler updates marker coordinates for spectrum files uploaded without GPS.
+// POST /api/update-coordinates
+// Body: {"trackID": "...", "lat": 34.488, "lon": 136.166}
+func updateCoordinatesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		TrackID string  `json:"trackID"`
+		Lat     float64 `json:"lat"`
+		Lon     float64 `json:"lon"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate inputs
+	if req.TrackID == "" {
+		http.Error(w, "trackID is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Lat < -90 || req.Lat > 90 {
+		http.Error(w, "Invalid latitude", http.StatusBadRequest)
+		return
+	}
+
+	if req.Lon < -180 || req.Lon > 180 {
+		http.Error(w, "Invalid longitude", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Update all markers with this trackID across all zoom levels
+	query := "UPDATE markers SET lat = ?, lon = ? WHERE trackID = ?"
+	args := []interface{}{req.Lat, req.Lon, req.TrackID}
+
+	if *dbType == "pgx" || *dbType == "duckdb" {
+		query = "UPDATE markers SET lat = $1, lon = $2 WHERE trackID = $3"
+	}
+
+	result, err := db.DB.ExecContext(ctx, query, args...)
+	if err != nil {
+		log.Printf("Error updating coordinates for track %s: %v", req.TrackID, err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "error",
+			"error":  "Failed to update coordinates",
+		})
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
+	log.Printf("Updated coordinates for track %s: %d markers updated to (%.6f, %.6f)",
+		req.TrackID, rowsAffected, req.Lat, req.Lon)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "success",
+		"markersUpdated": rowsAffected,
+		"lat":          req.Lat,
+		"lon":          req.Lon,
+	})
+}
+
+// =====================
+// ADMIN API
+// =====================
+
+// adminUploadsHandler lists all file uploads with metadata.
+// GET /api/admin/uploads?password=xxx&limit=100
+func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	// Verify password
+	password := r.URL.Query().Get("password")
+	if password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get limit parameter
+	limit := 100
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	ctx := r.Context()
+	uploads, err := db.GetUploads(ctx, limit)
+	if err != nil {
+		log.Printf("Error fetching uploads: %v", err)
+		http.Error(w, "Failed to fetch uploads", http.StatusInternalServerError)
+		return
+	}
+
+	// Return HTML table
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	html := `<!DOCTYPE html>
+<html>
+<head>
+	<title>Admin - File Uploads</title>
+	<style>
+		:root {
+			--bg-primary: #f5f5f5;
+			--bg-card: white;
+			--text-primary: #333;
+			--text-secondary: #666;
+			--text-muted: #999;
+			--border-color: #ddd;
+			--link-color: #0066cc;
+			--shadow: 0 1px 3px rgba(0,0,0,0.1);
+			--th-bg: #4CAF50;
+			--hover-bg: #f9f9f9;
+		}
+		@media (prefers-color-scheme: dark) {
+			:root {
+				--bg-primary: #1a1a1a;
+				--bg-card: #2b2b2b;
+				--text-primary: #eee;
+				--text-secondary: #aaa;
+				--text-muted: #777;
+				--border-color: #444;
+				--link-color: #90caf9;
+				--shadow: 0 1px 3px rgba(255,255,255,0.1);
+				--th-bg: #388e3c;
+				--hover-bg: #333;
+				color-scheme: dark;
+			}
+		}
+		:root[data-theme='light'] {
+			--bg-primary: #f5f5f5;
+			--bg-card: white;
+			--text-primary: #333;
+			--text-secondary: #666;
+			--text-muted: #999;
+			--border-color: #ddd;
+			--link-color: #0066cc;
+			--shadow: 0 1px 3px rgba(0,0,0,0.1);
+			--th-bg: #4CAF50;
+			--hover-bg: #f9f9f9;
+			color-scheme: light;
+		}
+		:root[data-theme='dark'] {
+			--bg-primary: #1a1a1a;
+			--bg-card: #2b2b2b;
+			--text-primary: #eee;
+			--text-secondary: #aaa;
+			--text-muted: #777;
+			--border-color: #444;
+			--link-color: #90caf9;
+			--shadow: 0 1px 3px rgba(255,255,255,0.1);
+			--th-bg: #388e3c;
+			--hover-bg: #333;
+			color-scheme: dark;
+		}
+		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
+		h1 { color: var(--text-primary); }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
+		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav a:hover { text-decoration: underline; }
+		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
+		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
+		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
+		td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+		tr:hover { background: var(--hover-bg); }
+		.empty { text-align: center; padding: 40px; color: var(--text-muted); font-style: italic; }
+		.trackid { font-family: monospace; color: var(--link-color); }
+		.filename { color: var(--text-primary); font-weight: 500; }
+		.filesize { color: var(--text-secondary); }
+		.datetime { color: var(--text-secondary); font-size: 0.9em; }
+		.delete-btn { background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 0.85em; }
+		.delete-btn:hover { background: #d32f2f; }
+		.delete-selected-btn { background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 1em; margin-left: 10px; }
+		.delete-selected-btn:hover { background: #d32f2f; }
+		.delete-selected-btn:disabled { background: #ccc; cursor: not-allowed; }
+		.checkbox-col { width: 40px; text-align: center; }
+		.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 20px; }
+		.sortable:hover { background: rgba(255,255,255,0.1); }
+		.sortable::after { content: '⇅'; position: absolute; right: 8px; opacity: 0.5; }
+		.sortable.asc::after { content: '▲'; opacity: 1; }
+		.sortable.desc::after { content: '▼'; opacity: 1; }
+		.filter-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 0.85em; box-sizing: border-box; }
+		.filter-row th { background: var(--bg-card); padding: 8px 12px; }
+	</style>
+</head>
+<body>
+	<h1>📁 File Uploads Administration</h1>
+	<div class="nav">
+		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+	</div>
+	<div class="summary">
+		<strong>Total Uploads:</strong> ` + strconv.Itoa(len(uploads)) + ` files (showing up to ` + strconv.Itoa(limit) + `)
+	</div>`
+
+	if len(uploads) == 0 {
+		html += `<div class="empty">No uploads found. Upload a spectrum file (.n42 or .spe) to see it appear here.</div>`
+	} else {
+		html += `
+	<table id="uploadsTable">
+		<thead>
+			<tr>
+				<th class="checkbox-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+				<th class="sortable" onclick="sortTable(1)" data-type="number">ID</th>
+				<th class="sortable" onclick="sortTable(2)" data-type="text">Filename</th>
+				<th class="sortable" onclick="sortTable(3)" data-type="text">Type</th>
+				<th class="sortable" onclick="sortTable(4)" data-type="text">Track ID</th>
+				<th class="sortable" onclick="sortTable(5)" data-type="text">Size</th>
+				<th class="sortable" onclick="sortTable(6)" data-type="text">Upload IP</th>
+				<th class="sortable" onclick="sortTable(7)" data-type="date">Upload Time</th>
+				<th>Actions</th>
+			</tr>
+			<tr class="filter-row">
+				<th></th>
+				<th><input type="text" class="filter-input" placeholder="ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter filename..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Type..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Size..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="IP..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th></th>
+			</tr>
+		</thead>
+		<tbody id="uploadsTableBody">`
+
+		for _, upload := range uploads {
+			uploadTime := time.Unix(upload.CreatedAt, 0).Format("2006-01-02 15:04:05")
+			fileSize := formatFileSize(upload.FileSize)
+
+			html += fmt.Sprintf(`
+			<tr>
+				<td class="checkbox-col"><input type="checkbox" class="track-checkbox" value="%s" onchange="updateDeleteButton()"></td>
+				<td>%d</td>
+				<td class="filename">%s</td>
+				<td>%s</td>
+				<td class="trackid"><a href="/trackid/%s">%s</a></td>
+				<td class="filesize">%s</td>
+				<td>%s</td>
+				<td class="datetime">%s</td>
+				<td><button class="delete-btn" onclick="deleteTrack('%s')">Delete</button></td>
+			</tr>`,
+				upload.TrackID,
+				upload.ID,
+				upload.Filename,
+				upload.FileType,
+				upload.TrackID, upload.TrackID,
+				fileSize,
+				upload.UploadIP,
+				uploadTime,
+				upload.TrackID,
+			)
+		}
+
+		html += `
+		</tbody>
+	</table>`
+	}
+
+	html += `
+	<script>
+		// Apply theme from sessionStorage to match map preference
+		(function() {
+			const media = window.matchMedia('(prefers-color-scheme: dark)');
+			const storedTheme = sessionStorage.getItem('themePreference');
+			const theme = storedTheme ? storedTheme : (media.matches ? 'dark' : 'light');
+			document.documentElement.dataset.theme = theme;
+		})();
+
+		function toggleSelectAll(checkbox) {
+			const checkboxes = document.querySelectorAll('.track-checkbox');
+			checkboxes.forEach(cb => cb.checked = checkbox.checked);
+			updateDeleteButton();
+		}
+
+		function updateDeleteButton() {
+			const checkboxes = document.querySelectorAll('.track-checkbox:checked');
+			const btn = document.getElementById('deleteSelectedBtn');
+			btn.disabled = checkboxes.length === 0;
+			btn.textContent = checkboxes.length > 0 ? '🗑️ Delete Selected (' + checkboxes.length + ')' : '🗑️ Delete Selected';
+		}
+
+		function deleteSelected() {
+			const checkboxes = document.querySelectorAll('.track-checkbox:checked');
+			const trackIDs = Array.from(checkboxes).map(cb => cb.value);
+
+			if (trackIDs.length === 0) return;
+
+			if (!confirm('Delete ' + trackIDs.length + ' track(s) and all associated data?')) {
+				return;
+			}
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			fetch('/api/admin/delete-multiple', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password: password, trackIDs: trackIDs })
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data.status === 'success') {
+					alert('Successfully deleted ' + data.deleted + ' track(s)');
+					window.location.reload();
+				} else if (data.status === 'partial') {
+					alert('Partially deleted ' + data.deleted + ' of ' + trackIDs.length + ' track(s). Some errors occurred.');
+					window.location.reload();
+				} else {
+					alert('Error: ' + (data.error || 'Unknown error'));
+				}
+			})
+			.catch(err => alert('Error: ' + err));
+		}
+
+		function deleteTrack(trackID) {
+			if (!confirm('Delete track ' + trackID + ' and all associated data?')) {
+				return;
+			}
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			fetch('/api/admin/delete', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password: password, trackID: trackID })
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data.status === 'success') {
+					alert('Track deleted successfully');
+					window.location.reload();
+				} else {
+					alert('Error: ' + (data.error || 'Unknown error'));
+				}
+			})
+			.catch(err => alert('Error: ' + err));
+		}
+
+		// Sorting functionality
+		let sortDirection = {};
+		function sortTable(columnIndex) {
+			const table = document.getElementById('uploadsTable');
+			const tbody = document.getElementById('uploadsTableBody');
+			const rows = Array.from(tbody.querySelectorAll('tr'));
+			const header = table.querySelector('thead tr:first-child th:nth-child(' + (columnIndex + 1) + ')');
+			const dataType = header.getAttribute('data-type');
+
+			// Toggle sort direction
+			const currentDir = sortDirection[columnIndex] || 'none';
+			sortDirection[columnIndex] = currentDir === 'asc' ? 'desc' : 'asc';
+
+			// Remove sort classes from all headers
+			table.querySelectorAll('.sortable').forEach(h => {
+				h.classList.remove('asc', 'desc');
+			});
+
+			// Add sort class to current header
+			header.classList.add(sortDirection[columnIndex]);
+
+			// Sort rows
+			rows.sort((a, b) => {
+				let aVal = a.cells[columnIndex].textContent.trim();
+				let bVal = b.cells[columnIndex].textContent.trim();
+
+				// Numeric comparison
+				if (dataType === 'number') {
+					aVal = parseInt(aVal) || 0;
+					bVal = parseInt(bVal) || 0;
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Date comparison
+				if (dataType === 'date') {
+					aVal = new Date(aVal).getTime();
+					bVal = new Date(bVal).getTime();
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Text comparison
+				if (sortDirection[columnIndex] === 'asc') {
+					return aVal.localeCompare(bVal);
+				} else {
+					return bVal.localeCompare(aVal);
+				}
+			});
+
+			// Reappend sorted rows
+			rows.forEach(row => tbody.appendChild(row));
+		}
+
+		// Filtering functionality
+		function filterTable() {
+			const table = document.getElementById('uploadsTable');
+			const tbody = document.getElementById('uploadsTableBody');
+			const filters = table.querySelectorAll('.filter-input');
+			const rows = tbody.querySelectorAll('tr');
+
+			rows.forEach(row => {
+				let show = true;
+				filters.forEach((filter, index) => {
+					const filterValue = filter.value.toLowerCase();
+					if (filterValue) {
+						const cellIndex = index + 1; // +1 because first column is checkbox
+						const cell = row.cells[cellIndex];
+						if (cell) {
+							const cellText = cell.textContent.toLowerCase();
+							if (!cellText.includes(filterValue)) {
+								show = false;
+							}
+						}
+					}
+				});
+				row.style.display = show ? '' : 'none';
+			});
+
+			// Update delete button after filtering
+			updateDeleteButton();
+		}
+	</script>
+</body>
+</html>`
+
+	fmt.Fprint(w, html)
+}
+
+// formatFileSize converts bytes to human-readable format
+func formatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// adminDeleteTrackHandler deletes a track and all associated data.
+// POST /api/admin/delete
+// Body: {"password": "xxx", "trackID": "abc123"}
+func adminDeleteTrackHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse request
+	var req struct {
+		Password string `json:"password"`
+		TrackID  string `json:"trackID"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify password
+	if req.Password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate trackID
+	if req.TrackID == "" {
+		http.Error(w, "trackID is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	err := db.DeleteTrack(ctx, req.TrackID)
+	if err != nil {
+		log.Printf("Error deleting track %s: %v", req.TrackID, err)
+		http.Error(w, "Failed to delete track", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Admin deleted track: %s", req.TrackID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Track deleted successfully",
+		"trackID": req.TrackID,
+	})
+}
+
+// adminDeleteMultipleTracksHandler deletes multiple tracks and all associated data.
+// POST /api/admin/delete-multiple
+// Body: {"password": "xxx", "trackIDs": ["abc123", "def456"]}
+func adminDeleteMultipleTracksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse request
+	var req struct {
+		Password string   `json:"password"`
+		TrackIDs []string `json:"trackIDs"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify password
+	if req.Password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate trackIDs
+	if len(req.TrackIDs) == 0 {
+		http.Error(w, "trackIDs is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	deleted := 0
+	var errors []string
+
+	for _, trackID := range req.TrackIDs {
+		err := db.DeleteTrack(ctx, trackID)
+		if err != nil {
+			log.Printf("Error deleting track %s: %v", trackID, err)
+			errors = append(errors, fmt.Sprintf("%s: %v", trackID, err))
+		} else {
+			deleted++
+		}
+	}
+
+	log.Printf("Admin deleted %d tracks (attempted %d)", deleted, len(req.TrackIDs))
+
+	w.Header().Set("Content-Type", "application/json")
+	if len(errors) > 0 {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "partial",
+			"message": fmt.Sprintf("Deleted %d of %d tracks", deleted, len(req.TrackIDs)),
+			"deleted": deleted,
+			"errors":  errors,
+		})
+	} else {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "All tracks deleted successfully",
+			"deleted": deleted,
+		})
+	}
+}
+
+// adminTracksHandler lists all tracks in the system with statistics.
+// GET /api/admin/tracks?password=xxx&limit=1000
+func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	// Verify password
+	password := r.URL.Query().Get("password")
+	if password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get limit parameter
+	limit := 1000
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	ctx := r.Context()
+
+	// Query all tracks with statistics (excluding realtime "live:" tracks)
+	query := `
+		SELECT
+			t.trackID,
+			COUNT(DISTINCT m.id) as marker_count,
+			MIN(m.date) as first_date,
+			MAX(m.date) as last_date,
+			COALESCE(SUM(CASE WHEN m.has_spectrum = 1 THEN 1 ELSE 0 END), 0) as spectra_count
+		FROM tracks t
+		LEFT JOIN markers m ON t.trackID = m.trackID
+		WHERE t.trackID NOT LIKE ?
+		GROUP BY t.trackID
+		ORDER BY last_date DESC
+		LIMIT ?
+	`
+	args := []interface{}{"live:%", limit}
+
+	if *dbType == "pgx" {
+		query = `
+			SELECT
+				t.trackID,
+				COUNT(DISTINCT m.id) as marker_count,
+				MIN(m.date) as first_date,
+				MAX(m.date) as last_date,
+				COALESCE(SUM(CASE WHEN m.has_spectrum = true THEN 1 ELSE 0 END), 0) as spectra_count
+			FROM tracks t
+			LEFT JOIN markers m ON t.trackID = m.trackID
+			WHERE t.trackID NOT LIKE $1
+			GROUP BY t.trackID
+			ORDER BY last_date DESC
+			LIMIT $2
+		`
+		args = []interface{}{"live:%", limit}
+	}
+
+	rows, err := db.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		log.Printf("Error fetching tracks: %v", err)
+		http.Error(w, "Failed to fetch tracks", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type TrackInfo struct {
+		TrackID      string `json:"trackID"`
+		MarkerCount  int64  `json:"markerCount"`
+		FirstDate    int64  `json:"firstDate"`
+		LastDate     int64  `json:"lastDate"`
+		SpectraCount int64  `json:"spectraCount"`
+	}
+
+	var tracks []TrackInfo
+	for rows.Next() {
+		var t TrackInfo
+		if err := rows.Scan(&t.TrackID, &t.MarkerCount, &t.FirstDate, &t.LastDate, &t.SpectraCount); err != nil {
+			log.Printf("Error scanning track row: %v", err)
+			continue
+		}
+		tracks = append(tracks, t)
+	}
+
+	// Return HTML table
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	html := `<!DOCTYPE html>
+<html>
+<head>
+	<title>Admin - All Tracks</title>
+	<style>
+		:root {
+			--bg-primary: #f5f5f5;
+			--bg-card: white;
+			--text-primary: #333;
+			--text-secondary: #666;
+			--text-muted: #999;
+			--border-color: #ddd;
+			--link-color: #0066cc;
+			--shadow: 0 1px 3px rgba(0,0,0,0.1);
+			--th-bg: #2196F3;
+			--hover-bg: #f9f9f9;
+			--badge-bg: #e3f2fd;
+			--badge-text: #1976d2;
+			--badge-spectrum-bg: #e8f5e9;
+			--badge-spectrum-text: #388e3c;
+		}
+		@media (prefers-color-scheme: dark) {
+			:root {
+				--bg-primary: #1a1a1a;
+				--bg-card: #2b2b2b;
+				--text-primary: #eee;
+				--text-secondary: #aaa;
+				--text-muted: #777;
+				--border-color: #444;
+				--link-color: #90caf9;
+				--shadow: 0 1px 3px rgba(255,255,255,0.1);
+				--th-bg: #1976d2;
+				--hover-bg: #333;
+				--badge-bg: rgba(144, 202, 249, 0.2);
+				--badge-text: #90caf9;
+				--badge-spectrum-bg: rgba(76, 175, 80, 0.2);
+				--badge-spectrum-text: #81c784;
+				color-scheme: dark;
+			}
+		}
+		:root[data-theme='light'] {
+			--bg-primary: #f5f5f5;
+			--bg-card: white;
+			--text-primary: #333;
+			--text-secondary: #666;
+			--text-muted: #999;
+			--border-color: #ddd;
+			--link-color: #0066cc;
+			--shadow: 0 1px 3px rgba(0,0,0,0.1);
+			--th-bg: #2196F3;
+			--hover-bg: #f9f9f9;
+			--badge-bg: #e3f2fd;
+			--badge-text: #1976d2;
+			--badge-spectrum-bg: #e8f5e9;
+			--badge-spectrum-text: #388e3c;
+			color-scheme: light;
+		}
+		:root[data-theme='dark'] {
+			--bg-primary: #1a1a1a;
+			--bg-card: #2b2b2b;
+			--text-primary: #eee;
+			--text-secondary: #aaa;
+			--text-muted: #777;
+			--border-color: #444;
+			--link-color: #90caf9;
+			--shadow: 0 1px 3px rgba(255,255,255,0.1);
+			--th-bg: #1976d2;
+			--hover-bg: #333;
+			--badge-bg: rgba(144, 202, 249, 0.2);
+			--badge-text: #90caf9;
+			--badge-spectrum-bg: rgba(76, 175, 80, 0.2);
+			--badge-spectrum-text: #81c784;
+			color-scheme: dark;
+		}
+		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
+		h1 { color: var(--text-primary); }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
+		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav a:hover { text-decoration: underline; }
+		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
+		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
+		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
+		td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+		tr:hover { background: var(--hover-bg); }
+		.empty { text-align: center; padding: 40px; color: var(--text-muted); font-style: italic; }
+		.trackid { font-family: monospace; color: var(--link-color); }
+		.badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.85em; background: var(--badge-bg); color: var(--badge-text); }
+		.badge.spectrum { background: var(--badge-spectrum-bg); color: var(--badge-spectrum-text); }
+		.datetime { color: var(--text-secondary); font-size: 0.9em; }
+		.delete-btn { background: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 0.85em; }
+		.delete-btn:hover { background: #d32f2f; }
+		.delete-selected-btn { background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 1em; margin-left: 10px; }
+		.delete-selected-btn:hover { background: #d32f2f; }
+		.delete-selected-btn:disabled { background: #ccc; cursor: not-allowed; }
+		.backfill-btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-size: 1em; margin-left: 10px; }
+		.backfill-btn:hover { background: #45a049; }
+		.checkbox-col { width: 40px; text-align: center; }
+		.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 20px; }
+		.sortable:hover { background: rgba(255,255,255,0.1); }
+		.sortable::after { content: '⇅'; position: absolute; right: 8px; opacity: 0.5; }
+		.sortable.asc::after { content: '▲'; opacity: 1; }
+		.sortable.desc::after { content: '▼'; opacity: 1; }
+		.filter-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 0.85em; box-sizing: border-box; }
+		.filter-row th { background: var(--bg-card); padding: 8px 12px; }
+	</style>
+</head>
+<body>
+	<h1>🗂️ All Tracks Administration</h1>
+	<div class="nav">
+		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+		<button class="backfill-btn" onclick="backfillUploads()">📥 Backfill Upload Records</button>
+		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+	</div>
+	<div class="summary">
+		<strong>Total Tracks:</strong> ` + strconv.Itoa(len(tracks)) + ` (showing up to ` + strconv.Itoa(limit) + `)
+	</div>`
+
+	if len(tracks) == 0 {
+		html += `<div class="empty">No tracks found in the database.</div>`
+	} else {
+		html += `
+	<table id="tracksTable">
+		<thead>
+			<tr>
+				<th class="checkbox-col"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+				<th class="sortable" onclick="sortTable(1)" data-type="text">Track ID</th>
+				<th class="sortable" onclick="sortTable(2)" data-type="number">Markers</th>
+				<th class="sortable" onclick="sortTable(3)" data-type="number">Spectra</th>
+				<th class="sortable" onclick="sortTable(4)" data-type="date">First Point</th>
+				<th class="sortable" onclick="sortTable(5)" data-type="date">Last Point</th>
+				<th>Actions</th>
+			</tr>
+			<tr class="filter-row">
+				<th></th>
+				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Min..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Min..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
+				<th></th>
+			</tr>
+		</thead>
+		<tbody id="tracksTableBody">`
+
+		for _, track := range tracks {
+			firstDate := time.Unix(track.FirstDate, 0).Format("2006-01-02 15:04")
+			lastDate := time.Unix(track.LastDate, 0).Format("2006-01-02 15:04")
+
+			html += fmt.Sprintf(`
+			<tr>
+				<td class="checkbox-col"><input type="checkbox" class="track-checkbox" value="%s" onchange="updateDeleteButton()"></td>
+				<td class="trackid"><a href="/trackid/%s">%s</a></td>
+				<td><span class="badge">%d points</span></td>
+				<td><span class="badge spectrum">%d spectra</span></td>
+				<td class="datetime">%s</td>
+				<td class="datetime">%s</td>
+				<td><button class="delete-btn" onclick="deleteTrack('%s')">Delete</button></td>
+			</tr>`,
+				track.TrackID,
+				track.TrackID, track.TrackID,
+				track.MarkerCount,
+				track.SpectraCount,
+				firstDate,
+				lastDate,
+				track.TrackID,
+			)
+		}
+
+		html += `
+		</tbody>
+	</table>`
+	}
+
+	html += `
+	<script>
+		// Apply theme from sessionStorage to match map preference
+		(function() {
+			const media = window.matchMedia('(prefers-color-scheme: dark)');
+			const storedTheme = sessionStorage.getItem('themePreference');
+			const theme = storedTheme ? storedTheme : (media.matches ? 'dark' : 'light');
+			document.documentElement.dataset.theme = theme;
+		})();
+
+		function toggleSelectAll(checkbox) {
+			const checkboxes = document.querySelectorAll('.track-checkbox');
+			checkboxes.forEach(cb => cb.checked = checkbox.checked);
+			updateDeleteButton();
+		}
+
+		function updateDeleteButton() {
+			const checkboxes = document.querySelectorAll('.track-checkbox:checked');
+			const btn = document.getElementById('deleteSelectedBtn');
+			btn.disabled = checkboxes.length === 0;
+			btn.textContent = checkboxes.length > 0 ? '🗑️ Delete Selected (' + checkboxes.length + ')' : '🗑️ Delete Selected';
+		}
+
+		function deleteSelected() {
+			const checkboxes = document.querySelectorAll('.track-checkbox:checked');
+			const trackIDs = Array.from(checkboxes).map(cb => cb.value);
+
+			if (trackIDs.length === 0) return;
+
+			if (!confirm('Delete ' + trackIDs.length + ' track(s) and all associated data?')) {
+				return;
+			}
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			fetch('/api/admin/delete-multiple', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password: password, trackIDs: trackIDs })
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data.status === 'success') {
+					alert('Successfully deleted ' + data.deleted + ' track(s)');
+					window.location.reload();
+				} else {
+					alert('Error: ' + (data.error || 'Unknown error'));
+				}
+			})
+			.catch(err => alert('Error: ' + err));
+		}
+
+		function deleteTrack(trackID) {
+			if (!confirm('Delete track ' + trackID + ' and all associated data?')) {
+				return;
+			}
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			fetch('/api/admin/delete', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password: password, trackID: trackID })
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data.status === 'success') {
+					alert('Track deleted successfully');
+					window.location.reload();
+				} else {
+					alert('Error: ' + (data.error || 'Unknown error'));
+				}
+			})
+			.catch(err => alert('Error: ' + err));
+		}
+
+		function backfillUploads() {
+			if (!confirm('Backfill the uploads table with existing spectrum data? This will create upload records for all spectra currently in the database.')) {
+				return;
+			}
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			fetch('/api/admin/backfill?password=' + password, {
+				method: 'POST'
+			})
+			.then(r => r.json())
+			.then(data => {
+				if (data.status === 'success') {
+					alert('Backfill complete: ' + data.count + ' records created');
+					window.location.href = '/api/admin/uploads?password=' + password;
+				} else {
+					alert('Error: ' + (data.error || 'Unknown error'));
+				}
+			})
+			.catch(err => alert('Error: ' + err));
+		}
+
+		// Sorting functionality
+		let sortDirection = {};
+		function sortTable(columnIndex) {
+			const table = document.getElementById('tracksTable');
+			const tbody = document.getElementById('tracksTableBody');
+			const rows = Array.from(tbody.querySelectorAll('tr'));
+			const header = table.querySelector('thead tr:first-child th:nth-child(' + (columnIndex + 1) + ')');
+			const dataType = header.getAttribute('data-type');
+
+			// Toggle sort direction
+			const currentDir = sortDirection[columnIndex] || 'none';
+			sortDirection[columnIndex] = currentDir === 'asc' ? 'desc' : 'asc';
+
+			// Remove sort classes from all headers
+			table.querySelectorAll('.sortable').forEach(h => {
+				h.classList.remove('asc', 'desc');
+			});
+
+			// Add sort class to current header
+			header.classList.add(sortDirection[columnIndex]);
+
+			// Sort rows
+			rows.sort((a, b) => {
+				let aVal = a.cells[columnIndex].textContent.trim();
+				let bVal = b.cells[columnIndex].textContent.trim();
+
+				// Extract numeric values from badges
+				if (dataType === 'number') {
+					aVal = parseInt(aVal.match(/\d+/) || '0');
+					bVal = parseInt(bVal.match(/\d+/) || '0');
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Date comparison
+				if (dataType === 'date') {
+					aVal = new Date(aVal).getTime();
+					bVal = new Date(bVal).getTime();
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
+				// Text comparison
+				if (sortDirection[columnIndex] === 'asc') {
+					return aVal.localeCompare(bVal);
+				} else {
+					return bVal.localeCompare(aVal);
+				}
+			});
+
+			// Reappend sorted rows
+			rows.forEach(row => tbody.appendChild(row));
+		}
+
+		// Filtering functionality
+		function filterTable() {
+			const table = document.getElementById('tracksTable');
+			const tbody = document.getElementById('tracksTableBody');
+			const filters = table.querySelectorAll('.filter-input');
+			const rows = tbody.querySelectorAll('tr');
+
+			rows.forEach(row => {
+				let show = true;
+				filters.forEach((filter, index) => {
+					const filterValue = filter.value.toLowerCase();
+					if (filterValue) {
+						const cellIndex = index + 1; // +1 because first column is checkbox
+						const cell = row.cells[cellIndex];
+						if (cell) {
+							const cellText = cell.textContent.toLowerCase();
+							if (!cellText.includes(filterValue)) {
+								show = false;
+							}
+						}
+					}
+				});
+				row.style.display = show ? '' : 'none';
+			});
+
+			// Update delete button after filtering
+			updateDeleteButton();
+		}
+	</script>
+</body>
+</html>`
+
+	fmt.Fprint(w, html)
+}
+
+// adminBackfillHandler backfills the uploads table with existing spectrum data.
+// POST /api/admin/backfill?password=xxx
+func adminBackfillHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	// Verify password
+	password := r.URL.Query().Get("password")
+	if password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Query all spectra (including those without filenames for legacy data)
+	query := `
+		SELECT
+			s.id,
+			COALESCE(s.filename, ''),
+			s.source_format,
+			m.trackID,
+			s.created_at
+		FROM spectra s
+		JOIN markers m ON s.marker_id = m.id
+	`
+
+	rows, err := db.DB.QueryContext(ctx, query)
+	if err != nil {
+		log.Printf("Error querying spectra: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "error",
+			"error":  fmt.Sprintf("Failed to query spectra: %v", err),
+		})
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var spectrumID int64
+		var filename, sourceFormat, trackID string
+		var createdAt int64
+
+		if err := rows.Scan(&spectrumID, &filename, &sourceFormat, &trackID, &createdAt); err != nil {
+			log.Printf("Error scanning spectrum row: %v", err)
+			continue
+		}
+
+		// Generate filename for legacy records that don't have one
+		if filename == "" {
+			ext := ".unknown"
+			if sourceFormat == "n42" {
+				ext = ".n42"
+			} else if sourceFormat == "spe" {
+				ext = ".spe"
+			}
+			filename = fmt.Sprintf("spectrum_%d%s", spectrumID, ext)
+		}
+
+		// Create upload record
+		upload := database.Upload{
+			Filename:  filename,
+			FileType:  sourceFormat,
+			TrackID:   trackID,
+			FileSize:  0, // Unknown for backfilled records
+			UploadIP:  "backfilled",
+			CreatedAt: createdAt,
+		}
+
+		if _, uploadErr := db.InsertUpload(ctx, upload); uploadErr != nil {
+			// Skip if already exists (duplicate key error)
+			if !strings.Contains(uploadErr.Error(), "UNIQUE constraint") &&
+			   !strings.Contains(uploadErr.Error(), "duplicate key") {
+				log.Printf("Warning: failed to backfill upload record for %s: %v", filename, uploadErr)
+			}
+			continue
+		}
+
+		count++
+	}
+
+	log.Printf("Admin backfilled %d upload records", count)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": "Upload records backfilled successfully",
+		"count":   count,
+	})
+}
+
+// =====================
 // WEB  — страница трека
 // =====================
 // trackHandler — страница одного трека.
@@ -4348,6 +5956,7 @@ func getMarkersHandler(w http.ResponseWriter, r *http.Request) {
 // aggregateMarkers chooses the most radioactive marker per grid cell while merging the
 // static query feed with an optional live stream. Keeping the grid map inside the goroutine
 // lets us reuse previous emissions and drop later duplicates without mutexes.
+// Markers with spectral data are prioritized over those without.
 func aggregateMarkers(ctx context.Context, base <-chan database.Marker, updates <-chan database.Marker, zoom int) <-chan database.Marker {
 	out := make(chan database.Marker)
 	go func() {
@@ -4359,7 +5968,17 @@ func aggregateMarkers(ctx context.Context, base <-chan database.Marker, updates 
 
 		emit := func(m database.Marker) {
 			key := fmt.Sprintf("%d:%d", int(m.Lat*scale), int(m.Lon*scale))
-			if prev, ok := cells[key]; !ok || m.DoseRate > prev.DoseRate {
+			prev, exists := cells[key]
+
+			// Decide if this marker should replace the previous one:
+			// 1. No previous marker exists, OR
+			// 2. New marker has spectrum and previous doesn't, OR
+			// 3. Both have same spectrum status and new has higher dose rate
+			shouldReplace := !exists ||
+				(m.HasSpectrum && !prev.HasSpectrum) ||
+				(m.HasSpectrum == prev.HasSpectrum && m.DoseRate > prev.DoseRate)
+
+			if shouldReplace {
 				cells[key] = m
 				select {
 				case out <- m:
@@ -5106,9 +6725,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("DB init: %v", err)
 	}
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			log.Printf("DB close: %v", closeErr)
+		}
+	}()
 	if err = db.InitSchema(dbCfg); err != nil {
 		log.Fatalf("DB schema: %v", err)
 	}
+	queueDuckDBMaintenanceAfterImport(driverName, db, log.Printf, "startup")
 
 	remoteURL := strings.TrimSpace(*importTGZURLFlag)
 	localArchive := strings.TrimSpace(*importTGZFileFlag)
@@ -5196,6 +6821,14 @@ func main() {
 	http.HandleFunc("/api/geoip", geoIPHandler)
 	http.HandleFunc("/s/", shortRedirectHandler)
 	http.HandleFunc("/api/docs", apiDocsHandler)
+	http.HandleFunc("/api/spectrum/", spectrumHandler)                  // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
+	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)  // GET /api/markers/spectra
+	http.HandleFunc("/api/update-coordinates", updateCoordinatesHandler) // POST /api/update-coordinates
+	http.HandleFunc("/api/admin/uploads", adminUploadsHandler)           // GET /api/admin/uploads?password=<pwd>
+	http.HandleFunc("/api/admin/tracks", adminTracksHandler)             // GET /api/admin/tracks?password=<pwd>
+	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)         // POST /api/admin/backfill?password=<pwd>
+	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)        // POST /api/admin/delete
+	http.HandleFunc("/api/admin/delete-multiple", adminDeleteMultipleTracksHandler) // POST /api/admin/delete-multiple
 
 	// API endpoints ship JSON/archives. Keeping registration close to other
 	// routes avoids surprises for operators scanning main() for handlers.
