@@ -1589,6 +1589,8 @@ body, html {
 
     <!-- Chart.js for spectrum visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
     <!-- Slider -->
     <script src="/static/nouislider.min.js"></script>
@@ -3300,7 +3302,43 @@ function renderSpectrumChart(markerID, spectrum) {
               return `Counts: ${context.parsed.y}`;
             }
           }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'xy'
+          },
+          zoom: {
+            wheel: {
+              enabled: false
+            },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(255, 215, 0, 0.3)',
+              borderColor: '#FFD700',
+              borderWidth: 2
+            },
+            mode: 'xy',
+            onZoomComplete: function({chart}) {
+              chart.update('none');
+            }
+          },
+          limits: {
+            x: {min: 'original', max: 'original'},
+            y: {min: 'original', max: 'original'}
+          }
+        },
+        resetZoom: {
+          enabled: true
         }
+      },
+      onClick: function(evt, activeEls, chart) {
+        if (evt.native.detail === 2) {
+          chart.resetZoom();
+        }
+      },
+      onHover: function(evt, activeEls, chart) {
+        evt.native.target.style.cursor = activeEls.length > 0 ? 'pointer' : 'crosshair';
       }
     }
   });
@@ -4267,7 +4305,7 @@ function clearIsotopeHighlight() {
   drawSpectrumChart(window.currentSpectrumCanvas, window.currentSpectrum);
 }
 
-function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlightColor = null) {
+function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlightColor = null, zoomRanges = null) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -4305,11 +4343,31 @@ function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlight
   const plotW = Math.max(plotRight - plotLeft, 10);
   const plotH = Math.max(plotBottom - plotTop, 10);
 
-  // Data ranges
-  const minX = 0;
-  const maxX = maxEnergy;
-  const minY = 0;
-  const maxY = maxCount;
+  // Data ranges - use zoom ranges if provided, otherwise use full range
+  const defaultRanges = { minX: 0, maxX: maxEnergy, minY: 0, maxY: maxCount };
+  canvas._defaultZoomRanges = defaultRanges; // Store for reset
+  const ranges = zoomRanges || canvas._zoomRanges || defaultRanges;
+  let minX = ranges.minX;
+  let maxX = ranges.maxX;
+  let minY = ranges.minY;
+  let maxY = ranges.maxY;
+
+  // Recalculate minY and maxY based on visible data when zoomed
+  if (zoomRanges || canvas._zoomRanges) {
+    let visibleMaxCount = 0;
+    let visibleMinCount = Infinity;
+    for (let i = 0; i < energies.length; i++) {
+      if (energies[i] >= minX && energies[i] <= maxX) {
+        visibleMaxCount = Math.max(visibleMaxCount, spectrum.channels[i]);
+        visibleMinCount = Math.min(visibleMinCount, spectrum.channels[i]);
+      }
+    }
+    if (visibleMaxCount > 0) {
+      maxY = visibleMaxCount;
+      minY = Math.max(0, visibleMinCount); // Keep at least 0 as minimum
+    }
+  }
+
   const rangeX = maxX - minX || 1;
   const rangeY = maxY - minY || 1;
 
@@ -4382,14 +4440,20 @@ function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlight
   ctx.lineJoin = 'round';
   ctx.beginPath();
 
+  let firstPoint = true;
   for (let i = 0; i < spectrum.channels.length; i++) {
     const energy = energies[i];
     const count = spectrum.channels[i];
+
+    // Only draw points within the visible energy range
+    if (energy < minX || energy > maxX) continue;
+
     const x = plotLeft + ((energy - minX) / rangeX) * plotW;
     const y = plotBottom - ((count - minY) / rangeY) * plotH;
 
-    if (i === 0) {
+    if (firstPoint) {
       ctx.moveTo(x, y);
+      firstPoint = false;
     } else {
       ctx.lineTo(x, y);
     }
@@ -4516,7 +4580,33 @@ function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlight
   };
 
   // Mouse move handler
+  // Zoom state shared between handlers
+  let zoomStart = null;
+  let isZooming = false;
+
   const handleMouseMove = function(e) {
+    // If zooming, handle zoom drawing instead
+    if (isZooming && zoomStart && baseChartImage) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Restore base chart image
+      ctx.putImageData(baseChartImage, 0, 0);
+
+      // Draw selection rectangle
+      ctx.strokeStyle = '#FFD700';
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+      ctx.lineWidth = 2;
+      const w = x - zoomStart.x;
+      const h = y - zoomStart.y;
+      ctx.fillRect(zoomStart.x, zoomStart.y, w, h);
+      ctx.strokeRect(zoomStart.x, zoomStart.y, w, h);
+
+      e.preventDefault();
+      return;
+    }
+
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -4601,6 +4691,84 @@ function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlight
   // Add event listeners
   canvas.addEventListener('mousemove', handleMouseMove);
   canvas.addEventListener('mouseout', handleMouseOut);
+
+  // Zoom functionality
+  const handleZoomStart = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Check if click is within plot area
+    if (x >= plotLeft && x <= plotRight && y >= plotTop && y <= plotBottom) {
+      isZooming = true;
+      zoomStart = { x, y };
+      e.preventDefault();
+    }
+  };
+
+  const handleZoomEnd = function(e) {
+    if (!isZooming || !zoomStart) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Calculate new zoom ranges
+    const x1 = Math.min(zoomStart.x, x);
+    const x2 = Math.max(zoomStart.x, x);
+    const y1 = Math.min(zoomStart.y, y);
+    const y2 = Math.max(zoomStart.y, y);
+
+    // Only zoom if selection is large enough (more than 10 pixels)
+    if (Math.abs(x2 - x1) > 10 && Math.abs(y2 - y1) > 10) {
+      const newMinX = minX + ((x1 - plotLeft) / plotW) * rangeX;
+      const newMaxX = minX + ((x2 - plotLeft) / plotW) * rangeX;
+      const newMaxY = maxY - ((y1 - plotTop) / plotH) * rangeY;
+      const newMinY = maxY - ((y2 - plotTop) / plotH) * rangeY;
+
+      canvas._zoomRanges = {
+        minX: Math.max(0, newMinX),
+        maxX: Math.min(maxEnergy, newMaxX),
+        minY: Math.max(0, newMinY),
+        maxY: Math.min(maxCount, newMaxY)
+      };
+
+      // Redraw with new zoom
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor);
+    } else {
+      // Selection too small, just redraw without zoom change
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor, ranges);
+    }
+
+    isZooming = false;
+    zoomStart = null;
+    e.preventDefault();
+  };
+
+  const handleZoomReset = function(e) {
+    if (e.detail === 2) { // Double click
+      canvas._zoomRanges = null;
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor);
+      e.preventDefault();
+    }
+  };
+
+  // Remove old zoom handlers if they exist
+  if (canvas._zoomStart) canvas.removeEventListener('mousedown', canvas._zoomStart);
+  if (canvas._zoomEnd) canvas.removeEventListener('mouseup', canvas._zoomEnd);
+  if (canvas._zoomReset) canvas.removeEventListener('click', canvas._zoomReset);
+
+  // Store and add zoom handlers
+  canvas._zoomStart = handleZoomStart;
+  canvas._zoomEnd = handleZoomEnd;
+  canvas._zoomReset = handleZoomReset;
+
+  canvas.addEventListener('mousedown', handleZoomStart);
+  canvas.addEventListener('mouseup', handleZoomEnd);
+  canvas.addEventListener('click', handleZoomReset);
+
+  // Change cursor to crosshair in plot area
+  canvas.style.cursor = 'crosshair';
 }
 
 
