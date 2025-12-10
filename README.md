@@ -64,9 +64,9 @@ Enable admin access by adding the `-admin-password` flag when starting the serve
 ./chicha-isotope-map -admin-password YOUR_SECURE_PASSWORD
 ```
 
-Then access admin pages at:
-- All Tracks: `http://localhost:8765/admin/tracks`
-- Uploads: `http://localhost:8765/admin/uploads`
+Then access admin pages at (password required in URL):
+- All Tracks: `http://localhost:8765/api/admin/tracks?password=YOUR_SECURE_PASSWORD`
+- Uploads: `http://localhost:8765/api/admin/uploads?password=YOUR_SECURE_PASSWORD`
 
 👉 [Full Admin Documentation](ADMIN.md) — detailed guide with screenshots, security best practices, and advanced usage
 

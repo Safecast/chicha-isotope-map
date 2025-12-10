@@ -22,17 +22,17 @@ To enable the admin panel, start the server with the `-admin-password` flag:
 
 ### Accessing the Admin Panel
 
-Once enabled, access admin features at:
-- **All Tracks:** `http://localhost:8765/admin/tracks`
-- **Uploads:** `http://localhost:8765/admin/uploads`
+Once enabled, access admin features at (include password in URL):
+- **All Tracks:** `http://localhost:8765/api/admin/tracks?password=YOUR_PASSWORD`
+- **Uploads:** `http://localhost:8765/api/admin/uploads?password=YOUR_PASSWORD`
 
-You'll be prompted for the admin password on first access.
+**Important:** The password must be included as a URL parameter. Replace `YOUR_PASSWORD` with your actual admin password. There is no separate login form - authentication is via the URL query parameter.
 
 ---
 
 ## 📊 All Tracks Page
 
-**URL:** `/admin/tracks`
+**URL:** `/api/admin/tracks?password=YOUR_PASSWORD`
 
 The All Tracks page provides a comprehensive overview of all radiation tracks stored in your database, with powerful bulk management capabilities.
 
@@ -65,7 +65,7 @@ Each track row provides:
 ### Usage Examples
 
 **View a specific track:**
-1. Navigate to `/admin/tracks`
+1. Navigate to `/api/admin/tracks?password=YOUR_PASSWORD`
 2. Find the track in the list
 3. Click "View on Map" to see it visualized
 
@@ -83,7 +83,7 @@ Each track row provides:
 
 ## 📁 Uploads Page
 
-**URL:** `/admin/uploads`
+**URL:** `/api/admin/uploads?password=YOUR_PASSWORD`
 
 The Uploads page tracks all file uploads to your radiation map, providing visibility into data sources and enabling bulk cleanup operations.
 
@@ -122,7 +122,7 @@ CREATE TABLE uploads (
 ### Usage Examples
 
 **Review recent uploads:**
-1. Navigate to `/admin/uploads`
+1. Navigate to `/api/admin/uploads?password=YOUR_PASSWORD`
 2. View the chronological list (most recent first)
 3. Check file types, sizes, and sources
 
@@ -250,7 +250,7 @@ While the admin panel provides a web interface, you can also manage data program
 
 **Delete a track via command line:**
 ```bash
-curl -X POST "http://localhost:8765/admin/delete-track" \
+curl -X POST "http://localhost:8765/api/admin/delete" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "password=YOUR_PASSWORD&trackID=TRACK_ID"
 ```
