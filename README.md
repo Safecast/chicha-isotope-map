@@ -23,9 +23,9 @@ If this map protects even one person or animal, building it was worth it. Let it
 
 Live demo: [https://pelora.org/](https://pelora.org/) — your node will look the same.
 
-👉 [Unified download page](https://github.com/matveynator/chicha-isotope-map/releases) (all platforms, latest builds)
+👉 [Unified download page](https://github.com/safecast/chicha-isotope-map/releases) (all platforms, latest builds)
 
-👉 [DeepWiki: Chicha Isotope Map](https://deepwiki.com/matveynator/chicha-isotope-map)
+👉 [DeepWiki: Chicha Isotope Map](https://deepwiki.com/safecast/chicha-isotope-map)
 
 ---
 
@@ -55,7 +55,7 @@ The project grows thanks to careful support from the **Safecast** community, the
 Fastest path: download the binary. No Docker, no databases, no extra tools — download, run, done.
 
 ### Option 1. Binary (recommended)
-1) Open the [releases page](https://github.com/matveynator/chicha-isotope-map/releases) and download the build for your system.
+1) Open the [releases page](https://github.com/safecast/chicha-isotope-map/releases) and download the build for your system.
 2) Make it executable and run:
 ```bash
 chmod +x ./chicha-isotope-map
@@ -80,7 +80,7 @@ Optional knobs:
 1) Install Docker (Desktop or CLI).
 2) Find **matveynator/chicha-isotope-map** on Docker Hub and click **Run** (or execute one command):
 ```bash
-docker run -d -p 8765:8765 --name chicha-isotope-map matveynator/chicha-isotope-map:latest
+docker run -d -p 8765:8765 --name chicha-isotope-map safecastr/chicha-isotope-map:latest
 ```
 3) Open [http://localhost:8765](http://localhost:8765) — that’s it.
 
