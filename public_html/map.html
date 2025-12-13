@@ -51,6 +51,7 @@ body, html {
           --info-card-border: 1px solid rgba(0, 0, 0, 0.08);
           --api-method-bg: rgba(0, 123, 255, 0.1);
           --api-method-text: #0056b3;
+          --isotope-highlight: #FF6B00; /* Orange for light mode - better contrast */
           color-scheme: light; /* Default to light scheme */
           --font-family-base: "Segoe UI", "Noto Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; /* Shared font stack keeps every control aligned */
           --font-size-base: 12px; /* Main text size for buttons, menus, and labels */
@@ -82,6 +83,7 @@ body, html {
             --info-card-border: 1px solid rgba(255, 255, 255, 0.08);
             --api-method-bg: rgba(144, 202, 249, 0.2);
             --api-method-text: #90caf9;
+            --isotope-highlight: #FFD700; /* Gold for dark mode */
             color-scheme: dark; /* Match system dark scheme */
           }
         }
@@ -159,6 +161,7 @@ body, html {
           --info-card-border: 1px solid rgba(0, 0, 0, 0.08);
           --api-method-bg: rgba(0, 123, 255, 0.1);
           --api-method-text: #0056b3;
+          --isotope-highlight: #FF6B00; /* Orange for light mode - better contrast */
           color-scheme: light; /* Force light scheme when manually selected */
         }
 
@@ -181,6 +184,7 @@ body, html {
           --info-card-border: 1px solid rgba(255, 255, 255, 0.08);
           --api-method-bg: rgba(144, 202, 249, 0.2);
           --api-method-text: #90caf9;
+          --isotope-highlight: #FFD700; /* Gold for dark mode */
           color-scheme: dark; /* Force dark scheme when manually selected */
         }
 
@@ -629,18 +633,23 @@ body, html {
         }
 
         .back-to-all-btn {
-          background-color: var(--control-bg);
-          border: var(--legend-border);
-          border-radius: 4px;
-          padding: 5px 10px;
+          background-color: #2196F3;
+          background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+          border: 2px solid #1976D2;
+          border-radius: 6px;
+          padding: 8px 16px;
           cursor: pointer;
           font-size: var(--font-size-base);
-          color: var(--modal-text);
-          box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+          font-weight: 600;
+          color: #ffffff;
+          box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4), 0 1px 3px rgba(0,0,0,0.3);
+          transition: all 0.2s ease;
         }
 
         .back-to-all-btn:hover {
-          background-color: var(--control-bg-hover);
+          background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+          box-shadow: 0 4px 12px rgba(33, 150, 243, 0.6), 0 2px 4px rgba(0,0,0,0.4);
+          transform: translateY(-1px);
         }
 
         /* Dedicated download container lives under the back button so
@@ -1011,7 +1020,7 @@ body, html {
           filter: grayscale(1) brightness(1) contrast(1);
         }
 
-        #liveModal {
+        #liveModal, #spectrumModal {
           display: none;
           position: fixed;
           top: 0;
@@ -1251,7 +1260,7 @@ body, html {
 
     <!-- GitHub link and program info -->
     <a href="https://github.com/Safecast/chicha-isotope-map" class="github-link" target="_blank" rel="noopener noreferrer" aria-label="{{translate "github_link_tooltip_desc"}}">
-      <img src="/static/images/safecast-logo-squared.png" alt="{{translate "description"}} (version: {{ .Version }})" class="github-icon">
+      <img src="/static/images/chicha-isotope-map-round-logo.png" alt="{{translate "description"}} (version: {{ .Version }})" class="github-icon">
     </a>
 
     <!-- Short link pill shows the shareable URL and copies it on click -->
@@ -1497,8 +1506,91 @@ body, html {
   </div>
 </div>
 
+<div id="spectrumModal">
+  <div class="live-modal-content">
+    <div class="live-modal-header">
+      <div style="font-size: 40px; line-height: 1;">📊</div>
+      <div>
+        <h3 id="spectrumModalTitle" class="live-modal-title">Gamma Spectrum</h3>
+        <p id="spectrumModalDescription" class="live-modal-description"></p>
+      </div>
+    </div>
+    <div id="spectrumModalMeta" class="live-modal-meta"></div>
+    <div class="live-chart-stack">
+      <div class="live-chart-block">
+        <h4 class="live-chart-title">
+          <span class="live-chart-label">Energy Spectrum</span>
+          <span class="live-chart-unit">Counts</span>
+        </h4>
+        <canvas id="spectrumChart" class="live-chart-canvas"></canvas>
+        <p id="spectrumChartEmpty" class="live-chart-empty"></p>
+      </div>
+    </div>
+    <div id="spectrumIsotopes" style="margin-top: 16px; padding: 12px; background: var(--control-bg); border: var(--legend-border); border-radius: 8px;">
+      <h4 style="margin: 0 0 8px 0; font-size: var(--font-size-base); font-weight: 600; color: var(--modal-text);">Common Isotope Peaks Reference</h4>
+      <div id="spectrumIsotopeList" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 4px 12px; font-size: var(--font-size-sm);">
+        <!-- Will be populated dynamically with isotope reference list -->
+        <div style="padding: 4px 0; color: var(--modal-text); opacity: 0.6; font-style: italic;">Loading isotope database...</div>
+      </div>
+    </div>
+    <div style="margin-top: 16px; text-align: center;">
+      <button id="spectrumDownloadJSON" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download JSON</button>
+      <button id="spectrumDownloadCSV" style="margin: 4px; padding: 8px 16px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text);">Download CSV</button>
+    </div>
+    <button type="button" class="live-modal-close" id="spectrumModalClose">Close</button>
+  </div>
+</div>
+
+<!-- Coordinate Input Dialog for spectrum files without GPS -->
+<div id="coordinateInputDialog" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 10001; align-items: center; justify-content: center;">
+  <div style="background: var(--modal-bg); padding: 24px; border-radius: 12px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+    <h3 style="margin: 0 0 16px 0; color: var(--modal-text); font-size: 20px;">📍 Set Spectrum Location</h3>
+    <p style="margin: 0 0 20px 0; color: var(--modal-text); opacity: 0.8; font-size: var(--font-size-base);">
+      This spectrum file doesn't contain GPS coordinates. Please enter the location where the measurement was taken.
+    </p>
+
+    <div style="margin-bottom: 16px;">
+      <label style="display: block; margin-bottom: 6px; color: var(--modal-text); font-weight: 600;">Latitude:</label>
+      <input type="number" id="coordInputLat" step="0.000001" placeholder="e.g., 34.4883891"
+             style="width: 100%; padding: 10px; border: var(--legend-border); border-radius: 6px; background: var(--control-bg); color: var(--modal-text); font-size: var(--font-size-base); box-sizing: border-box;">
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; margin-bottom: 6px; color: var(--modal-text); font-weight: 600;">Longitude:</label>
+      <input type="number" id="coordInputLon" step="0.000001" placeholder="e.g., 136.1659156"
+             style="width: 100%; padding: 10px; border: var(--legend-border); border-radius: 6px; background: var(--control-bg); color: var(--modal-text); font-size: var(--font-size-base); box-sizing: border-box;">
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+      <button id="coordMapPickBtn" style="flex: 1; padding: 10px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text); font-size: var(--font-size-base);">
+        📌 Click on Map
+      </button>
+      <button id="coordCurrentBtn" style="flex: 1; padding: 10px; background: var(--control-bg); border: var(--legend-border); border-radius: 6px; cursor: pointer; color: var(--modal-text); font-size: var(--font-size-base);">
+        📍 Use Current Location
+      </button>
+    </div>
+
+    <div style="display: flex; gap: 12px;">
+      <button id="coordSubmitBtn" style="flex: 1; padding: 12px; background: #4CAF50; border: none; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; font-size: var(--font-size-base);">
+        Submit Location
+      </button>
+      <button id="coordCancelBtn" style="flex: 1; padding: 12px; background: #f44336; border: none; border-radius: 6px; cursor: pointer; color: white; font-weight: 600; font-size: var(--font-size-base);">
+        Cancel
+      </button>
+    </div>
+
+    <p id="coordInputError" style="margin: 12px 0 0 0; color: #f44336; font-size: var(--font-size-sm); display: none;"></p>
+    <p id="coordInputStatus" style="margin: 12px 0 0 0; color: var(--isotope-highlight); font-size: var(--font-size-sm); opacity: 0.8;"></p>
+  </div>
+</div>
+
     <!-- Load Leaflet JavaScript library -->
     <script src="/static/leaflet.js"></script>
+
+    <!-- Chart.js for spectrum visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
 
     <!-- Slider -->
     <script src="/static/nouislider.min.js"></script>
@@ -2927,6 +3019,19 @@ function createDateRangeSlider(){
       ? `${(marker.speed * 3.6).toFixed(1)} km/h`
       : '—';
 
+    const hasSpectrum = marker.hasSpectrum || false;
+    const markerId = marker.id || marker.markerId;
+    const spectrumSection = hasSpectrum ? `
+        <hr style="margin: 8px 0; border-top: 1px solid #ccc;">
+        <div><strong>📊 Gamma Spectrum</strong></div>
+        <div id="spectrum-container-${markerId}" style="margin-top: 8px;">
+          <canvas id="spectrum-chart-${markerId}" style="max-height: 250px;"></canvas>
+          <div style="margin-top: 8px; text-align: center;">
+            <button onclick="downloadSpectrum(${markerId}, 'json')" style="margin: 2px; padding: 4px 8px;">Download JSON</button>
+            <button onclick="downloadSpectrum(${markerId}, 'csv')" style="margin: 2px; padding: 4px 8px;">Download CSV</button>
+          </div>
+        </div>` : '';
+
     return `
       <div class="custom-tooltip">
         <div><strong>${translate('radiation_dose')}:</strong><br>
@@ -2942,6 +3047,7 @@ function createDateRangeSlider(){
             ${translate('track_id')}: ${marker.trackID}
           </a>
         </div>
+        ${spectrumSection}
       </div>`;
   }
 
@@ -3009,23 +3115,58 @@ function updateMarkers(){
       .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
       .bindPopup(getPopupContent(m));
     } else {
-      marker = L.circleMarker([m.lat, m.lon], {
-        radius      : getRadius(m.doseRate, zoom),
-        fillColor   : getGradientColor(m.doseRate),
-        color       : getGradientColor(m.doseRate),
-        weight      : 1,
-        opacity     : getFillOpacity(m.speed) + 0.1,
-        fillOpacity : getFillOpacity(m.speed)
-      })
-      .addTo(map)
-      .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
-      .bindPopup(getPopupContent(m));
+      // Add special styling for markers with spectrum data
+      const hasSpectrum = m.hasSpectrum || false;
+
+      if (hasSpectrum) {
+        // Spectrum markers: use divIcon with same size as realtime markers
+        const baseRadius = getRadius(m.doseRate, zoom);
+        const radius = baseRadius * 3;  // Same as realtime markers
+        const size = radius * 3.7;
+        const fillColor = getGradientColor(m.doseRate);
+        const value = formatMicroRoentgen(m.doseRate);
+        const fontSize = Math.max(Math.round(size * 0.32), 11);
+
+        const html = `
+          <div class="spectrum-marker" style="background:${fillColor};border:3px solid var(--isotope-highlight);color:#000000;width:${size}px;height:${size}px;border-radius:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:${fontSize}px;font-weight:bold;">
+            <div style="font-size:${Math.max(fontSize * 0.8, 10)}px;">📊</div>
+            <div>${value}</div>
+          </div>`;
+
+        marker = L.marker([m.lat, m.lon], {
+          icon: L.divIcon({className:'', html: html, iconSize:[size, size], iconAnchor:[size/2, size/2]})
+        })
+        .addTo(map)
+        .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true });
+
+        // Open spectrum modal on click
+        marker.on('click', function() {
+          openSpectrumModal(m.id, m);
+        });
+      } else {
+        // Regular markers: use circleMarker
+        const markerStyle = {
+          radius      : getRadius(m.doseRate, zoom),
+          fillColor   : getGradientColor(m.doseRate),
+          color       : getGradientColor(m.doseRate),
+          weight      : 1,
+          opacity     : getFillOpacity(m.speed) + 0.1,
+          fillOpacity : getFillOpacity(m.speed)
+        };
+
+        marker = L.circleMarker([m.lat, m.lon], markerStyle)
+        .addTo(map)
+        .bindTooltip(getTooltipContent(m), { direction:'top', className:'custom-tooltip', offset:[0,-8], interactive:true })
+        .bindPopup(getPopupContent(m));
+      }
     }
 
     // Store dose rate and timestamp on marker for later size updates
     marker.doseRate  = m.doseRate;
     marker.date      = m.date;
     marker.isRealtime = isLive;
+    marker.hasSpectrum = m.hasSpectrum || false;
+    marker.markerId = m.id;  // Store marker ID for spectrum API calls
     circleMarkers[m.id || m.trackID] = marker;
   };
 
@@ -3068,6 +3209,158 @@ async function fetchLiveHistory(deviceID) {
   const data = await resp.json();
   liveHistoryCache.set(deviceID, data);
   return data;
+}
+
+// Spectrum data caching and visualization
+const spectrumCache = new Map();
+let activeSpectrumCharts = new Map();
+
+async function fetchSpectrum(markerID) {
+  if (!markerID) return null;
+  if (spectrumCache.has(markerID)) {
+    return spectrumCache.get(markerID);
+  }
+  try {
+    const resp = await fetch(`/api/spectrum/${markerID}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    spectrumCache.set(markerID, data);
+    return data;
+  } catch (err) {
+    console.error('Error fetching spectrum:', err);
+    return null;
+  }
+}
+
+function renderSpectrumChart(markerID, spectrum) {
+  const canvasId = `spectrum-chart-${markerID}`;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  // Destroy existing chart if it exists
+  if (activeSpectrumCharts.has(canvasId)) {
+    activeSpectrumCharts.get(canvasId).destroy();
+  }
+
+  const ctx = canvas.getContext('2d');
+
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  const colors = chartColors();
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: energies,
+      datasets: [{
+        label: 'Counts',
+        data: spectrum.channels,
+        borderColor: '#FFD700',
+        backgroundColor: 'rgba(255, 215, 0, 0.1)',
+        borderWidth: 1,
+        pointRadius: 0,
+        tension: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          type: 'linear',
+          title: {
+            display: true,
+            text: 'Energy (keV)',
+            color: colors.text
+          },
+          ticks: { color: colors.text },
+          grid: { color: colors.grid }
+        },
+        y: {
+          type: 'logarithmic',
+          title: {
+            display: true,
+            text: 'Counts',
+            color: colors.text
+          },
+          ticks: { color: colors.text },
+          grid: { color: colors.grid }
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            title: function(context) {
+              return `Energy: ${context[0].label} keV`;
+            },
+            label: function(context) {
+              return `Counts: ${context.parsed.y}`;
+            }
+          }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'xy'
+          },
+          zoom: {
+            wheel: {
+              enabled: false
+            },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(255, 215, 0, 0.3)',
+              borderColor: '#FFD700',
+              borderWidth: 2
+            },
+            mode: 'xy',
+            onZoomComplete: function({chart}) {
+              chart.update('none');
+            }
+          },
+          limits: {
+            x: {min: 'original', max: 'original'},
+            y: {min: 'original', max: 'original'}
+          }
+        },
+        resetZoom: {
+          enabled: true
+        }
+      },
+      onClick: function(evt, activeEls, chart) {
+        if (evt.native.detail === 2) {
+          chart.resetZoom();
+        }
+      },
+      onHover: function(evt, activeEls, chart) {
+        evt.native.target.style.cursor = activeEls.length > 0 ? 'pointer' : 'crosshair';
+      }
+    }
+  });
+
+  activeSpectrumCharts.set(canvasId, chart);
+}
+
+async function loadAndRenderSpectrum(markerID) {
+  const spectrum = await fetchSpectrum(markerID);
+  if (spectrum) {
+    renderSpectrumChart(markerID, spectrum);
+  }
+}
+
+function downloadSpectrum(markerID, format) {
+  const url = `/api/spectrum/${markerID}/download?format=${format}`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `spectrum_${markerID}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 function chartColors() {
@@ -3744,7 +4037,739 @@ async function openLiveModal(deviceID, fallback) {
   }
 }
 
+// Spectrum Modal Functions
+function hideSpectrumModal() {
+  const modal = document.getElementById('spectrumModal');
+  if (modal) modal.style.display = 'none';
+}
 
+function identifyIsotopesInSpectrum(spectrum) {
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  // Find peaks in the spectrum (simple threshold-based detection)
+  const maxCount = Math.max(...spectrum.channels);
+  const threshold = maxCount * 0.1; // Peaks must be at least 10% of max
+  const peaks = [];
+
+  for (let i = 1; i < spectrum.channels.length - 1; i++) {
+    const count = spectrum.channels[i];
+    const prevCount = spectrum.channels[i - 1];
+    const nextCount = spectrum.channels[i + 1];
+
+    // Check if this is a local maximum above threshold
+    if (count > threshold && count > prevCount && count > nextCount) {
+      peaks.push({ energy: energies[i], count: count });
+    }
+  }
+
+  // Match peaks to isotopes
+  const detectedIsotopes = new Map(); // Use Map to avoid duplicates
+  const tolerance = 15; // keV tolerance for matching
+
+  peaks.forEach(peak => {
+    const isotope = findIsotopeByEnergy(peak.energy, tolerance);
+    if (isotope) {
+      if (!detectedIsotopes.has(isotope)) {
+        detectedIsotopes.set(isotope, []);
+      }
+      detectedIsotopes.get(isotope).push(peak.energy.toFixed(1));
+    }
+  });
+
+  // Convert Map to array of objects
+  const result = [];
+  detectedIsotopes.forEach((energies, isotope) => {
+    result.push({
+      isotope: isotope,
+      energies: energies
+    });
+  });
+
+  return result;
+}
+
+async function openSpectrumModal(markerID, fallbackMarker) {
+  const modal = document.getElementById('spectrumModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  const titleEl = document.getElementById('spectrumModalTitle');
+  const descEl = document.getElementById('spectrumModalDescription');
+  const metaEl = document.getElementById('spectrumModalMeta');
+  const closeBtn = document.getElementById('spectrumModalClose');
+  const emptyEl = document.getElementById('spectrumChartEmpty');
+  const canvas = document.getElementById('spectrumChart');
+
+  if (titleEl) titleEl.textContent = 'Gamma Spectrum';
+  if (descEl) descEl.textContent = 'Energy spectrum from scintillator detector';
+  if (emptyEl) { emptyEl.textContent = ''; emptyEl.style.display = 'none'; }
+
+  // Set up download buttons
+  const jsonBtn = document.getElementById('spectrumDownloadJSON');
+  const csvBtn = document.getElementById('spectrumDownloadCSV');
+  if (jsonBtn) {
+    jsonBtn.onclick = function() { downloadSpectrum(markerID, 'json'); };
+  }
+  if (csvBtn) {
+    csvBtn.onclick = function() { downloadSpectrum(markerID, 'csv'); };
+  }
+
+  // Build metadata
+  if (metaEl && fallbackMarker) {
+    const parts = [];
+    parts.push(`<div><strong>Dose Rate:</strong> ${(fallbackMarker.doseRate * 100).toFixed(2)} µR/h (${fallbackMarker.doseRate.toFixed(2)} µSv/h)</div>`);
+    if (fallbackMarker.date) {
+      const date = new Date(fallbackMarker.date * 1000);
+      parts.push(`<div><strong>Captured:</strong> ${date.toLocaleString()}</div>`);
+    }
+    if (fallbackMarker.trackID) {
+      parts.push(`<div><strong>Track ID:</strong> ${fallbackMarker.trackID}</div>`);
+    }
+    metaEl.innerHTML = parts.join('');
+  }
+
+  // Clear canvas
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Fetch and draw spectrum
+  try {
+    const spectrum = await fetchSpectrum(markerID);
+    if (spectrum && canvas) {
+      // Store spectrum data globally for redrawing with highlights
+      window.currentSpectrum = spectrum;
+      window.currentSpectrumCanvas = canvas;
+
+      drawSpectrumChart(canvas, spectrum);
+
+      // Display complete isotope reference list
+      const isotopeList = buildIsotopeReferenceList();
+      const isotopeListEl = document.getElementById('spectrumIsotopeList');
+
+      if (isotopeListEl) {
+        // Create two-column compact layout with hover functionality
+        isotopeListEl.innerHTML = isotopeList.map(item => {
+          const isotopeColor = getIsotopeColor(item.name);
+          return `
+          <div class="isotope-item" data-isotope="${item.name}" style="display: flex; align-items: baseline; gap: 6px; font-size: var(--font-size-sm); line-height: 1.6; cursor: pointer; padding: 4px; border-radius: 4px; transition: background 0.2s;">
+            <span style="font-weight: 600; color: ${isotopeColor}; min-width: 90px;">${item.name}:</span>
+            <span style="font-family: monospace; color: var(--modal-text); opacity: 0.85;">${item.energies} keV</span>
+          </div>
+        `;
+        }).join('');
+
+        // Add hover event listeners to isotope items
+        const isotopeItems = isotopeListEl.querySelectorAll('.isotope-item');
+        isotopeItems.forEach(item => {
+          item.addEventListener('mouseenter', function() {
+            const isotopeName = this.getAttribute('data-isotope');
+            highlightIsotopeOnChart(isotopeName);
+            // Add background highlight to the hovered item
+            this.style.background = 'var(--control-bg)';
+          });
+
+          item.addEventListener('mouseleave', function() {
+            clearIsotopeHighlight();
+            // Remove background highlight
+            this.style.background = 'transparent';
+          });
+        });
+      }
+    } else if (emptyEl) {
+      emptyEl.textContent = 'No spectrum data available';
+      emptyEl.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('Error loading spectrum:', err);
+    if (emptyEl) {
+      emptyEl.textContent = 'Error loading spectrum data';
+      emptyEl.style.display = 'block';
+    }
+  }
+}
+
+// Isotope energy lookup table (keV)
+const isotopeEnergyTable = [
+  { isotope: 'H-3 (Tritium)', energy: 18.6 },
+  { isotope: 'Am-241', energy: 59.5 },
+  { isotope: 'Ba-133', energy: 81.0 },
+  { isotope: 'Ba-133', energy: 276.4 },
+  { isotope: 'Ba-133', energy: 302.9 },
+  { isotope: 'Ba-133', energy: 356.0 },
+  { isotope: 'Ba-133', energy: 383.8 },
+  { isotope: 'Ra-226', energy: 186.2 },
+  { isotope: 'Ra-226', energy: 242.0 },
+  { isotope: 'Th-232', energy: 238.6 },
+  { isotope: 'Ra-226', energy: 295.2 },
+  { isotope: 'Ra-226', energy: 351.9 },
+  { isotope: 'I-131', energy: 364.5 },
+  { isotope: 'Annihilation', energy: 511.0 },
+  { isotope: 'Th-232', energy: 583.2 },
+  { isotope: 'I-131', energy: 637.0 },
+  { isotope: 'Cs-137', energy: 661.7 },
+  { isotope: 'Th-232', energy: 911.2 },
+  { isotope: 'Co-60', energy: 1173.2 },
+  { isotope: 'Na-22', energy: 1274.5 },
+  { isotope: 'Co-60', energy: 1332.5 },
+  { isotope: 'K-40', energy: 1460.8 },
+  { isotope: 'Th-232', energy: 2614.5 }
+];
+
+// Get color for a specific isotope
+function getIsotopeColor(isotopeName) {
+  const isotopeColors = {
+    'K-40': '#FFD700',           // Gold
+    'Cs-137': '#00FF00',         // Green
+    'I-131': '#9370DB',          // Medium Purple
+    'Co-60': '#4169E1',          // Royal Blue
+    'Th-232': '#FF8C00',         // Dark Orange
+    'Ra-226': '#FF4500',         // Orange Red
+    'Ba-133': '#00CED1',         // Dark Turquoise
+    'Am-241': '#FF1493',         // Deep Pink
+    'Na-22': '#32CD32',          // Lime Green
+    'H-3 (Tritium)': '#87CEEB', // Sky Blue
+    'Annihilation': '#FFFFFF'    // White
+  };
+
+  const color = isotopeColors[isotopeName] || '#FFD700';
+  console.log('[COLOR DEBUG] Isotope:', isotopeName, '-> Color:', color);
+  return color;
+}
+
+function findIsotopeByEnergy(energy, tolerance = 10) {
+  // tolerance in keV - how close the energy needs to be to match
+  for (let i = 0; i < isotopeEnergyTable.length; i++) {
+    const entry = isotopeEnergyTable[i];
+    if (Math.abs(entry.energy - energy) <= tolerance) {
+      return entry.isotope;
+    }
+  }
+  return null;
+}
+
+// Get all energy peaks for a given isotope
+function getIsotopeEnergies(isotopeName) {
+  const energies = [];
+  for (let i = 0; i < isotopeEnergyTable.length; i++) {
+    const entry = isotopeEnergyTable[i];
+    if (entry.isotope === isotopeName) {
+      energies.push(entry.energy);
+    }
+  }
+  return energies;
+}
+
+function buildIsotopeReferenceList() {
+  // Group energies by isotope
+  const isotopeMap = new Map();
+
+  isotopeEnergyTable.forEach(entry => {
+    if (!isotopeMap.has(entry.isotope)) {
+      isotopeMap.set(entry.isotope, []);
+    }
+    isotopeMap.get(entry.isotope).push(entry.energy);
+  });
+
+  // Convert to array and format
+  const isotopes = [];
+  isotopeMap.forEach((energies, isotope) => {
+    isotopes.push({
+      name: isotope,
+      energies: energies.join(', ')
+    });
+  });
+
+  return isotopes;
+}
+
+// Highlight isotope peaks on chart
+function highlightIsotopeOnChart(isotopeName) {
+  if (!window.currentSpectrum || !window.currentSpectrumCanvas) return;
+
+  const energies = getIsotopeEnergies(isotopeName);
+  const color = getIsotopeColor(isotopeName);
+
+  // Redraw chart with highlights
+  drawSpectrumChart(window.currentSpectrumCanvas, window.currentSpectrum, energies, color);
+}
+
+// Clear isotope highlights
+function clearIsotopeHighlight() {
+  if (!window.currentSpectrum || !window.currentSpectrumCanvas) return;
+
+  // Redraw chart without highlights
+  drawSpectrumChart(window.currentSpectrumCanvas, window.currentSpectrum);
+}
+
+function drawSpectrumChart(canvas, spectrum, highlightEnergies = null, highlightColor = null, zoomRanges = null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (width === 0 || height === 0) return;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const colors = chartColors();
+  canvas.style.background = colors.background;
+
+  // Calculate energy values for each channel
+  const cal = spectrum.calibration || { a: 0, b: spectrum.energyMaxKeV / spectrum.channelCount, c: 0 };
+  const energies = spectrum.channels.map((_, i) => cal.a + cal.b * i + cal.c * i * i);
+
+  const maxCount = Math.max(...spectrum.channels);
+  const maxEnergy = Math.max(...energies);
+
+  // Define plot area with padding (similar to drawLiveChart)
+  const leftPad = 70;
+  const rightPad = 20;
+  const topPad = 20;
+  const bottomPad = 44;
+
+  const plotLeft = leftPad;
+  const plotRight = width - rightPad;
+  const plotTop = topPad;
+  const plotBottom = height - bottomPad;
+  const plotW = Math.max(plotRight - plotLeft, 10);
+  const plotH = Math.max(plotBottom - plotTop, 10);
+
+  // Data ranges - use zoom ranges if provided, otherwise use full range
+  const defaultRanges = { minX: 0, maxX: maxEnergy, minY: 0, maxY: maxCount };
+  canvas._defaultZoomRanges = defaultRanges; // Store for reset
+  const ranges = zoomRanges || canvas._zoomRanges || defaultRanges;
+  let minX = ranges.minX;
+  let maxX = ranges.maxX;
+  let minY = ranges.minY;
+  let maxY = ranges.maxY;
+
+  // Recalculate minY and maxY based on visible data when zoomed
+  if (zoomRanges || canvas._zoomRanges) {
+    let visibleMaxCount = 0;
+    let visibleMinCount = Infinity;
+    for (let i = 0; i < energies.length; i++) {
+      if (energies[i] >= minX && energies[i] <= maxX) {
+        visibleMaxCount = Math.max(visibleMaxCount, spectrum.channels[i]);
+        visibleMinCount = Math.min(visibleMinCount, spectrum.channels[i]);
+      }
+    }
+    if (visibleMaxCount > 0) {
+      maxY = visibleMaxCount;
+      minY = Math.max(0, visibleMinCount); // Keep at least 0 as minimum
+    }
+  }
+
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+
+  // Draw axes
+  ctx.strokeStyle = colors.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(plotLeft, plotTop);
+  ctx.lineTo(plotLeft, plotBottom);
+  ctx.lineTo(plotRight, plotBottom);
+  ctx.stroke();
+
+  const fontTokens = resolveFontTokens();
+  const fonts = {
+    axisY: fontTokens.sm + ' ' + fontTokens.family,
+    axisX: fontTokens.xs + ' ' + fontTokens.family,
+    label: fontTokens.base + ' ' + fontTokens.family,
+  };
+
+  // Draw Y-axis (Counts) ticks and labels
+  const ticksY = niceTicks(minY, maxY, 5);
+  ctx.font = fonts.axisY;
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ticksY.forEach(function(value) {
+    if (!isFinite(value)) return;
+    const y = plotBottom - ((value - minY) / rangeY) * plotH;
+    // Draw grid line
+    ctx.strokeStyle = colorWithAlpha(colors.grid, 0.5);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+    // Draw label
+    ctx.fillStyle = colors.text;
+    ctx.fillText(Math.round(value).toString(), plotLeft - 8, y);
+  });
+
+  // Draw X-axis (Energy keV) ticks and labels
+  const ticksX = niceTicks(minX, maxX, 6);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = fonts.axisX;
+  const axisLabelY = height - 12;
+  ticksX.forEach(function(value) {
+    if (!isFinite(value)) return;
+    const x = plotLeft + ((value - minX) / rangeX) * plotW;
+    // Draw grid line
+    ctx.strokeStyle = colorWithAlpha(colors.grid, 0.35);
+    ctx.beginPath();
+    ctx.moveTo(x, plotTop);
+    ctx.lineTo(x, plotBottom);
+    ctx.stroke();
+    // Draw label
+    ctx.fillStyle = colors.text;
+    ctx.fillText(Math.round(value).toString(), x, plotBottom + 4);
+  });
+
+  // Draw axis label (Energy keV)
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'center';
+  ctx.font = fonts.axisX;
+  ctx.fillText('Energy (keV)', plotLeft + plotW / 2, axisLabelY);
+
+  // Draw spectrum line
+  ctx.strokeStyle = colors.line;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+
+  let firstPoint = true;
+  for (let i = 0; i < spectrum.channels.length; i++) {
+    const energy = energies[i];
+    const count = spectrum.channels[i];
+
+    // Only draw points within the visible energy range
+    if (energy < minX || energy > maxX) continue;
+
+    const x = plotLeft + ((energy - minX) / rangeX) * plotW;
+    const y = plotBottom - ((count - minY) / rangeY) * plotH;
+
+    if (firstPoint) {
+      ctx.moveTo(x, y);
+      firstPoint = false;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+
+  // Draw isotope energy highlights if provided
+  if (highlightEnergies && highlightEnergies.length > 0 && highlightColor) {
+    ctx.strokeStyle = highlightColor;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.7;
+    ctx.setLineDash([8, 4]); // Dashed line pattern
+
+    highlightEnergies.forEach(energy => {
+      if (energy >= minX && energy <= maxX) {
+        const x = plotLeft + ((energy - minX) / rangeX) * plotW;
+
+        // Draw vertical line
+        ctx.beginPath();
+        ctx.moveTo(x, plotTop);
+        ctx.lineTo(x, plotBottom);
+        ctx.stroke();
+
+        // Draw energy label at top
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = highlightColor;
+        ctx.font = 'bold ' + fonts.axisX;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(Math.round(energy) + ' keV', x, plotTop - 4);
+        ctx.globalAlpha = 0.7;
+      }
+    });
+
+    // Reset line dash and alpha
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1.0;
+  }
+
+  // Add interactive tooltip
+  let tooltipDiv = document.getElementById('spectrumTooltip');
+  if (!tooltipDiv) {
+    tooltipDiv = document.createElement('div');
+    tooltipDiv.id = 'spectrumTooltip';
+    tooltipDiv.style.cssText = `
+      position: absolute;
+      display: none;
+      background: var(--modal-bg);
+      color: var(--modal-text);
+      border: 1px solid var(--modal-text);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: var(--font-size-sm);
+      pointer-events: none;
+      z-index: 10000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    `;
+    document.body.appendChild(tooltipDiv);
+  }
+
+  // Remove old event listeners if they exist
+  const oldMouseMove = canvas._spectrumMouseMove;
+  const oldMouseOut = canvas._spectrumMouseOut;
+  if (oldMouseMove) canvas.removeEventListener('mousemove', oldMouseMove);
+  if (oldMouseOut) canvas.removeEventListener('mouseout', oldMouseOut);
+
+  // Save the original canvas image data for efficient redrawing
+  let baseChartImage = null;
+  // Capture the base chart after first draw
+  setTimeout(() => {
+    baseChartImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    console.log('[Spectrum DEBUG] Base chart image captured:', canvas.width, 'x', canvas.height);
+  }, 0);
+
+  // Track currently hovered isotope
+  let currentHoverIsotope = null;
+
+  // Function to draw energy peak markers for an isotope
+  const drawIsotopeMarkers = function(isotopeName) {
+    console.log('[Spectrum DEBUG] drawIsotopeMarkers called for:', isotopeName, 'baseChartImage exists:', !!baseChartImage);
+    if (!isotopeName || !baseChartImage) {
+      console.log('[Spectrum DEBUG] Returning early - no isotope or no base image');
+      return;
+    }
+
+    // Restore base chart
+    ctx.putImageData(baseChartImage, 0, 0);
+
+    const isotopeEnergies = getIsotopeEnergies(isotopeName);
+    console.log('[Spectrum DEBUG] Isotope energies for', isotopeName, ':', isotopeEnergies);
+    const colors = chartColors();
+    const isotopeColor = getIsotopeColor(isotopeName);
+    console.log('[Spectrum DEBUG] Using color for', isotopeName, ':', isotopeColor);
+
+    // Draw vertical lines for each energy peak
+    isotopeEnergies.forEach(peakEnergy => {
+      // Convert energy to canvas x position
+      const xPos = plotLeft + ((peakEnergy - minX) / rangeX) * plotW;
+
+      // Only draw if within visible range
+      if (xPos >= plotLeft && xPos <= plotRight) {
+        ctx.save();
+        ctx.strokeStyle = isotopeColor;
+        console.log('[Spectrum DEBUG] Drawing line with color:', ctx.strokeStyle, 'for', isotopeName);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]); // Dashed line
+        ctx.globalAlpha = 0.7;
+
+        ctx.beginPath();
+        ctx.moveTo(xPos, plotTop);
+        ctx.lineTo(xPos, plotBottom);
+        ctx.stroke();
+
+        // Draw energy label at top
+        ctx.fillStyle = colors.text || '#e0e0e0';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.globalAlpha = 1.0;
+        ctx.fillText(peakEnergy.toFixed(1) + ' keV', xPos, plotTop - 5);
+
+        ctx.restore();
+      }
+    });
+  };
+
+  // Mouse move handler
+  // Zoom state shared between handlers
+  let zoomStart = null;
+  let isZooming = false;
+
+  const handleMouseMove = function(e) {
+    // If zooming, handle zoom drawing instead
+    if (isZooming && zoomStart && baseChartImage) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Restore base chart image
+      ctx.putImageData(baseChartImage, 0, 0);
+
+      // Draw selection rectangle
+      ctx.strokeStyle = '#FFD700';
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+      ctx.lineWidth = 2;
+      const w = x - zoomStart.x;
+      const h = y - zoomStart.y;
+      ctx.fillRect(zoomStart.x, zoomStart.y, w, h);
+      ctx.strokeRect(zoomStart.x, zoomStart.y, w, h);
+
+      e.preventDefault();
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if mouse is within plot area
+    if (mouseX < plotLeft || mouseX > plotRight || mouseY < plotTop || mouseY > plotBottom) {
+      tooltipDiv.style.display = 'none';
+      // Clear markers if moving out of plot area
+      if (currentHoverIsotope !== null && baseChartImage) {
+        currentHoverIsotope = null;
+        ctx.putImageData(baseChartImage, 0, 0); // Restore base chart
+      }
+      return;
+    }
+
+    // Convert mouse position to data coordinates
+    const dataX = minX + ((mouseX - plotLeft) / plotW) * rangeX;
+
+    // Find closest data point
+    let closestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < energies.length; i++) {
+      const dist = Math.abs(energies[i] - dataX);
+      if (dist < minDist) {
+        minDist = dist;
+        closestIdx = i;
+      }
+    }
+
+    const energy = energies[closestIdx];
+    const count = spectrum.channels[closestIdx];
+
+    // Check if energy matches known isotope
+    const isotope = findIsotopeByEnergy(energy, 10);
+    console.log('[Spectrum DEBUG] Hover at', energy.toFixed(1), 'keV, detected isotope:', isotope);
+
+    // If isotope changed, redraw markers
+    if (isotope !== currentHoverIsotope) {
+      console.log('[Spectrum DEBUG] Isotope changed from', currentHoverIsotope, 'to', isotope);
+      currentHoverIsotope = isotope;
+      // Draw markers for new isotope (or clear if null)
+      if (isotope) {
+        drawIsotopeMarkers(isotope);
+      } else if (baseChartImage) {
+        console.log('[Spectrum DEBUG] Clearing markers, restoring base chart');
+        ctx.putImageData(baseChartImage, 0, 0); // Restore base chart
+      }
+    }
+
+    // Update tooltip content and position
+    let tooltipContent = '';
+    if (isotope) {
+      const allEnergies = getIsotopeEnergies(isotope);
+      const energyList = allEnergies.map(e => e.toFixed(1)).join(', ');
+      const isotopeColor = getIsotopeColor(isotope);
+      console.log('[Spectrum DEBUG] Building tooltip for', isotope, '- all energies:', energyList);
+      tooltipContent = `<div style="color: ${isotopeColor}; font-weight: bold;">${isotope}</div><strong>${energy.toFixed(1)} keV</strong><br>Counts: ${count}<br><span style="font-size: 0.9em;">Other peaks: ${energyList} keV</span>`;
+    } else {
+      tooltipContent = `<strong>${energy.toFixed(1)} keV</strong><br>Counts: ${count}`;
+    }
+
+    tooltipDiv.innerHTML = tooltipContent;
+    tooltipDiv.style.display = 'block';
+    tooltipDiv.style.left = (e.clientX + 10) + 'px';
+    tooltipDiv.style.top = (e.clientY + 10) + 'px';
+  };
+
+  // Mouse out handler
+  const handleMouseOut = function() {
+    tooltipDiv.style.display = 'none';
+    // Clear markers when mouse leaves canvas
+    if (currentHoverIsotope !== null && baseChartImage) {
+      currentHoverIsotope = null;
+      ctx.putImageData(baseChartImage, 0, 0); // Restore base chart
+    }
+  };
+
+  // Store handlers on canvas so we can remove them later
+  canvas._spectrumMouseMove = handleMouseMove;
+  canvas._spectrumMouseOut = handleMouseOut;
+
+  // Add event listeners
+  canvas.addEventListener('mousemove', handleMouseMove);
+  canvas.addEventListener('mouseout', handleMouseOut);
+
+  // Zoom functionality
+  const handleZoomStart = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Check if click is within plot area
+    if (x >= plotLeft && x <= plotRight && y >= plotTop && y <= plotBottom) {
+      isZooming = true;
+      zoomStart = { x, y };
+      e.preventDefault();
+    }
+  };
+
+  const handleZoomEnd = function(e) {
+    if (!isZooming || !zoomStart) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Calculate new zoom ranges
+    const x1 = Math.min(zoomStart.x, x);
+    const x2 = Math.max(zoomStart.x, x);
+    const y1 = Math.min(zoomStart.y, y);
+    const y2 = Math.max(zoomStart.y, y);
+
+    // Only zoom if selection is large enough (more than 10 pixels)
+    if (Math.abs(x2 - x1) > 10 && Math.abs(y2 - y1) > 10) {
+      const newMinX = minX + ((x1 - plotLeft) / plotW) * rangeX;
+      const newMaxX = minX + ((x2 - plotLeft) / plotW) * rangeX;
+      const newMaxY = maxY - ((y1 - plotTop) / plotH) * rangeY;
+      const newMinY = maxY - ((y2 - plotTop) / plotH) * rangeY;
+
+      canvas._zoomRanges = {
+        minX: Math.max(0, newMinX),
+        maxX: Math.min(maxEnergy, newMaxX),
+        minY: Math.max(0, newMinY),
+        maxY: Math.min(maxCount, newMaxY)
+      };
+
+      // Redraw with new zoom
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor);
+    } else {
+      // Selection too small, just redraw without zoom change
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor, ranges);
+    }
+
+    isZooming = false;
+    zoomStart = null;
+    e.preventDefault();
+  };
+
+  const handleZoomReset = function(e) {
+    if (e.detail === 2) { // Double click
+      canvas._zoomRanges = null;
+      drawSpectrumChart(canvas, spectrum, highlightEnergies, highlightColor);
+      e.preventDefault();
+    }
+  };
+
+  // Remove old zoom handlers if they exist
+  if (canvas._zoomStart) canvas.removeEventListener('mousedown', canvas._zoomStart);
+  if (canvas._zoomEnd) canvas.removeEventListener('mouseup', canvas._zoomEnd);
+  if (canvas._zoomReset) canvas.removeEventListener('click', canvas._zoomReset);
+
+  // Store and add zoom handlers
+  canvas._zoomStart = handleZoomStart;
+  canvas._zoomEnd = handleZoomEnd;
+  canvas._zoomReset = handleZoomReset;
+
+  canvas.addEventListener('mousedown', handleZoomStart);
+  canvas.addEventListener('mouseup', handleZoomEnd);
+  canvas.addEventListener('click', handleZoomReset);
+
+  // Change cursor to crosshair in plot area
+  canvas.style.cursor = 'crosshair';
+}
 
 
 let debounceTimeout;
@@ -4400,6 +5425,14 @@ function centerMapToLocation() {
                 lastTrackURL               = response.trackURL;   // remember
                 serverProcessing.innerText = translate('processing_complete');
                 serverProcessing.style.color = 'green';
+
+                // Check if this is a spectrum file without coordinates
+                if (response.needsCoordinates && response.trackID) {
+                  serverProcessing.innerText = '⚠ Needs location';
+                  serverProcessing.style.color = 'orange';
+                  // Show coordinate input dialog after all uploads complete
+                  pendingCoordinateUpdate = { trackID: response.trackID, fileName: file.name, trackURL: response.trackURL };
+                }
               } else if (response.status === 'processing') {
                 lastTrackURL               = null;
                 serverProcessing.innerText = translate('processing_complete');
@@ -4419,12 +5452,15 @@ function centerMapToLocation() {
             if (completedUploads === totalFiles) {
               setTimeout(() => {
                 fileOverlay.style.display = 'none';
-                /* redirect to last successfully processed track */
-                  if (lastTrackURL) {
-                    window.location.href = lastTrackURL;
-                  } else {
-                    updateMarkers();   // keep the map open for background imports
-                  }
+
+                // Show coordinate dialog if needed, otherwise redirect
+                if (pendingCoordinateUpdate) {
+                  showCoordinateDialog(pendingCoordinateUpdate.trackID, pendingCoordinateUpdate.fileName, pendingCoordinateUpdate.trackURL);
+                } else if (lastTrackURL) {
+                  window.location.href = lastTrackURL;
+                } else {
+                  updateMarkers();   // keep the map open for background imports
+                }
               }, 700);
             }
           };
@@ -4437,6 +5473,174 @@ function centerMapToLocation() {
       }
     </script>
 
+    <!-- Coordinate Input Dialog Script -->
+    <script>
+      let pendingCoordinateUpdate = null;
+
+      function showCoordinateDialog(trackID, fileName, trackURL) {
+        pendingCoordinateUpdate = { trackID, fileName, trackURL };
+        const dialog = document.getElementById('coordinateInputDialog');
+        const statusEl = document.getElementById('coordInputStatus');
+        const errorEl = document.getElementById('coordInputError');
+
+        statusEl.textContent = `File: ${fileName}`;
+        statusEl.style.display = 'block';
+        errorEl.style.display = 'none';
+
+        dialog.style.display = 'flex';
+
+        // Pre-fill with current map center if available
+        if (map) {
+          const center = map.getCenter();
+          document.getElementById('coordInputLat').value = center.lat.toFixed(6);
+          document.getElementById('coordInputLon').value = center.lng.toFixed(6);
+        }
+      }
+
+      function hideCoordinateDialog() {
+        document.getElementById('coordinateInputDialog').style.display = 'none';
+        pendingCoordinateUpdate = null;
+      }
+
+      async function submitCoordinates() {
+        const latInput = document.getElementById('coordInputLat');
+        const lonInput = document.getElementById('coordInputLon');
+        const errorEl = document.getElementById('coordInputError');
+        const submitBtn = document.getElementById('coordSubmitBtn');
+
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+
+        // Validate inputs
+        if (isNaN(lat) || isNaN(lon)) {
+          errorEl.textContent = 'Please enter valid numbers for latitude and longitude.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (lat < -90 || lat > 90) {
+          errorEl.textContent = 'Latitude must be between -90 and 90.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (lon < -180 || lon > 180) {
+          errorEl.textContent = 'Longitude must be between -180 and 180.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (!pendingCoordinateUpdate) {
+          errorEl.textContent = 'No pending upload to update.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        // Disable submit button during request
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        errorEl.style.display = 'none';
+
+        try {
+          const response = await fetch('/api/update-coordinates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              trackID: pendingCoordinateUpdate.trackID,
+              lat: lat,
+              lon: lon
+            })
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.status === 'success') {
+            // Success! Navigate to the track page
+            const trackURL = pendingCoordinateUpdate ? pendingCoordinateUpdate.trackURL : null;
+            hideCoordinateDialog();
+            if (trackURL) {
+              window.location.href = trackURL;
+            } else {
+              // Fallback to map location if trackURL is not available
+              const zoom = 15;
+              window.location.href = `/#${zoom}/${lat}/${lon}`;
+            }
+          } else {
+            errorEl.textContent = result.error || 'Failed to update coordinates. Please try again.';
+            errorEl.style.display = 'block';
+          }
+        } catch (error) {
+          errorEl.textContent = 'Network error. Please check your connection and try again.';
+          errorEl.style.display = 'block';
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit Location';
+        }
+      }
+
+      // Event listeners for coordinate dialog
+      document.addEventListener('DOMContentLoaded', function() {
+        // Submit button
+        document.getElementById('coordSubmitBtn').addEventListener('click', submitCoordinates);
+
+        // Cancel button
+        document.getElementById('coordCancelBtn').addEventListener('click', hideCoordinateDialog);
+
+        // Click on map button
+        document.getElementById('coordMapPickBtn').addEventListener('click', function() {
+          const statusEl = document.getElementById('coordInputStatus');
+          statusEl.textContent = 'Click anywhere on the map to select a location...';
+
+          // Store current pending update before hiding dialog
+          const currentUpdate = pendingCoordinateUpdate;
+          hideCoordinateDialog();
+
+          // Add one-time click handler to map
+          const mapClickHandler = function(e) {
+            document.getElementById('coordInputLat').value = e.latlng.lat.toFixed(6);
+            document.getElementById('coordInputLon').value = e.latlng.lng.toFixed(6);
+            showCoordinateDialog(currentUpdate.trackID, currentUpdate.fileName, currentUpdate.trackURL);
+            map.off('click', mapClickHandler);
+          };
+
+          map.once('click', mapClickHandler);
+        });
+
+        // Use current location button
+        document.getElementById('coordCurrentBtn').addEventListener('click', function() {
+          const errorEl = document.getElementById('coordInputError');
+
+          if ('geolocation' in navigator) {
+            errorEl.textContent = 'Getting your location...';
+            errorEl.style.color = 'var(--isotope-highlight)';
+            errorEl.style.display = 'block';
+
+            navigator.geolocation.getCurrentPosition(
+              function(position) {
+                document.getElementById('coordInputLat').value = position.coords.latitude.toFixed(6);
+                document.getElementById('coordInputLon').value = position.coords.longitude.toFixed(6);
+                errorEl.style.display = 'none';
+              },
+              function(error) {
+                errorEl.textContent = 'Could not get your location: ' + error.message;
+                errorEl.style.color = '#f44336';
+              }
+            );
+          } else {
+            errorEl.textContent = 'Geolocation is not supported by your browser.';
+            errorEl.style.color = '#f44336';
+            errorEl.style.display = 'block';
+          }
+        });
+
+        // Close dialog on Escape key
+        document.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape' && document.getElementById('coordinateInputDialog').style.display === 'flex') {
+            hideCoordinateDialog();
+          }
+        });
+      });
+    </script>
 
     <!-- Theme toggle script -->
     <script>
@@ -4812,6 +6016,18 @@ function centerMapToLocation() {
     var liveClose = document.getElementById('liveModalClose');
     if (liveClose) {
       liveClose.addEventListener('click', function(){ hideLiveModal(); });
+    }
+
+    // Spectrum modal event listeners
+    var spectrumModal = document.getElementById('spectrumModal');
+    if (spectrumModal) {
+      spectrumModal.addEventListener('click', function(e){
+        if (e.target === spectrumModal) hideSpectrumModal();
+      });
+    }
+    var spectrumClose = document.getElementById('spectrumModalClose');
+    if (spectrumClose) {
+      spectrumClose.addEventListener('click', function(){ hideSpectrumModal(); });
     }
   })();
 </script>
