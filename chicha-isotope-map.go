@@ -23,7 +23,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/acme/autocert"
 	"html"
 	"html/template"
 	"image/color"
@@ -47,6 +46,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 
 	"chicha-isotope-map/pkg/api"
 	"chicha-isotope-map/pkg/cimimport"
@@ -4200,14 +4201,25 @@ func mapHandler(w http.ResponseWriter, r *http.Request) {
 	lang := getPreferredLanguage(r)
 
 	// Готовим шаблон
-	tmpl := template.Must(template.New("map.html").Funcs(template.FuncMap{
+	// If map.html exists on disk (during dev), use it. Otherwise use embedded.
+	// This enables hot-reloading of the UI without rebuilding.
+	funcMap := template.FuncMap{
 		"translate": func(key string) string {
 			if val, ok := translations[lang][key]; ok {
 				return val
 			}
 			return translations["en"][key]
 		},
-	}).ParseFS(content, "public_html/map.html"))
+	}
+
+	var tmpl *template.Template
+	if _, err := os.Stat("public_html/map.html"); err == nil {
+		tmpl = template.Must(template.New("map.html").Funcs(funcMap).ParseFiles("public_html/map.html"))
+	} else {
+		tmpl = template.Must(template.New("map.html").Funcs(funcMap).ParseFS(content, "public_html/map.html"))
+	}
+	// Only set the header if 'w' is available here. Wait, checking context.
+	// Yes, 'w' is the ResponseWriter argument to mapHandler.
 
 	if CompileVersion == "dev" {
 		CompileVersion = "latest"
@@ -4642,10 +4654,10 @@ func updateCoordinatesHandler(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":       "success",
+		"status":         "success",
 		"markersUpdated": rowsAffected,
-		"lat":          req.Lat,
-		"lon":          req.Lon,
+		"lat":            req.Lat,
+		"lon":            req.Lon,
 	})
 }
 
@@ -5726,7 +5738,7 @@ func adminBackfillHandler(w http.ResponseWriter, r *http.Request) {
 		if _, uploadErr := db.InsertUpload(ctx, upload); uploadErr != nil {
 			// Skip if already exists (duplicate key error)
 			if !strings.Contains(uploadErr.Error(), "UNIQUE constraint") &&
-			   !strings.Contains(uploadErr.Error(), "duplicate key") {
+				!strings.Contains(uploadErr.Error(), "duplicate key") {
 				log.Printf("Warning: failed to backfill upload record for %s: %v", filename, uploadErr)
 			}
 			continue
@@ -5762,14 +5774,22 @@ func trackHandler(w http.ResponseWriter, r *http.Request) {
 	trackID := parts[2] // всё равно понадобится в JS
 
 	// --- шаблон ----------------------------------------------------------------
-	tmpl := template.Must(template.New("map.html").Funcs(template.FuncMap{
+	// If map.html exists on disk, use it so we can iterate without rebuilding.
+	funcMap := template.FuncMap{
 		"translate": func(key string) string {
 			if v, ok := translations[lang][key]; ok {
 				return v
 			}
 			return translations["en"][key]
 		},
-	}).ParseFS(content, "public_html/map.html"))
+	}
+
+	var tmpl *template.Template
+	if _, err := os.Stat("public_html/map.html"); err == nil {
+		tmpl = template.Must(template.New("map.html").Funcs(funcMap).ParseFiles("public_html/map.html"))
+	} else {
+		tmpl = template.Must(template.New("map.html").Funcs(funcMap).ParseFS(content, "public_html/map.html"))
+	}
 
 	translationsJSON, err := marshalTemplateJS(translations)
 	if err != nil {
@@ -6833,13 +6853,13 @@ func main() {
 	http.HandleFunc("/api/geoip", geoIPHandler)
 	http.HandleFunc("/s/", shortRedirectHandler)
 	http.HandleFunc("/api/docs", apiDocsHandler)
-	http.HandleFunc("/api/spectrum/", spectrumHandler)                  // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
-	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)  // GET /api/markers/spectra
-	http.HandleFunc("/api/update-coordinates", updateCoordinatesHandler) // POST /api/update-coordinates
-	http.HandleFunc("/api/admin/uploads", adminUploadsHandler)           // GET /api/admin/uploads?password=<pwd>
-	http.HandleFunc("/api/admin/tracks", adminTracksHandler)             // GET /api/admin/tracks?password=<pwd>
-	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)         // POST /api/admin/backfill?password=<pwd>
-	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)        // POST /api/admin/delete
+	http.HandleFunc("/api/spectrum/", spectrumHandler)                              // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
+	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)              // GET /api/markers/spectra
+	http.HandleFunc("/api/update-coordinates", updateCoordinatesHandler)            // POST /api/update-coordinates
+	http.HandleFunc("/api/admin/uploads", adminUploadsHandler)                      // GET /api/admin/uploads?password=<pwd>
+	http.HandleFunc("/api/admin/tracks", adminTracksHandler)                        // GET /api/admin/tracks?password=<pwd>
+	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)                    // POST /api/admin/backfill?password=<pwd>
+	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)                   // POST /api/admin/delete
 	http.HandleFunc("/api/admin/delete-multiple", adminDeleteMultipleTracksHandler) // POST /api/admin/delete-multiple
 
 	// API endpoints ship JSON/archives. Keeping registration close to other
