@@ -26,6 +26,7 @@ type Marker struct {
 	AltitudeValid    bool               `json:"-"`                    // Tracks whether altitude was explicitly supplied so exporters can omit empty fields.
 	TemperatureValid bool               `json:"-"`                    // Marks that temperature was present in the source payload instead of default zero values.
 	HumidityValid    bool               `json:"-"`                    // Signals that humidity existed; keeps downstream encoders from inventing placeholders.
+	HasSpectrum      bool               `json:"hasSpectrum,omitempty"` // Indicates if this marker has associated spectral data
 }
 
 type Data struct {
@@ -72,4 +73,33 @@ type RealtimeMeasurement struct {
 	Tube       string  `json:"tube"`       // Detector tube advertised by the device feed
 	Country    string  `json:"country"`    // Country hint reported or inferred from coordinates
 	Extra      string  `json:"extra"`      // JSON encoded bag with optional metrics (temperature, humidity)
+}
+
+// EnergyCalibration stores polynomial coefficients for converting channel numbers to energy values.
+// The energy calibration formula is: Energy(keV) = A + B*channel + C*channel^2
+// This is the standard quadratic calibration used by most gamma spectrometry software.
+type EnergyCalibration struct {
+	A float64 `json:"a"` // Constant/offset term (keV)
+	B float64 `json:"b"` // Linear coefficient (keV/channel)
+	C float64 `json:"c"` // Quadratic coefficient (keV/channel^2)
+}
+
+// Spectrum represents gamma spectroscopy data from a scintillator-based detector.
+// Spectral data provides detailed information about the energy distribution of detected
+// gamma rays, enabling isotope identification and more precise radiation analysis.
+type Spectrum struct {
+	ID            int64              `json:"id"`                  // Unique identifier for the spectrum
+	MarkerID      int64              `json:"markerID"`            // Foreign key linking to the associated marker
+	Channels      []int              `json:"channels"`            // Array of counts per energy channel (typically 1024 channels)
+	ChannelCount  int                `json:"channelCount"`        // Number of channels in the spectrum
+	EnergyMinKeV  float64            `json:"energyMinKeV"`        // Minimum energy in keV (typically 0)
+	EnergyMaxKeV  float64            `json:"energyMaxKeV"`        // Maximum energy in keV (typically 3000)
+	LiveTimeSec   float64            `json:"liveTimeSec"`         // Live time - actual measurement duration excluding dead time
+	RealTimeSec   float64            `json:"realTimeSec"`         // Real time - total elapsed time including dead time
+	DeviceModel   string             `json:"deviceModel"`         // Detector model (e.g., "RadiaCode-102", "AtomFast")
+	Calibration   *EnergyCalibration `json:"calibration"`         // Energy calibration coefficients for channel-to-energy conversion
+	SourceFormat  string             `json:"sourceFormat"`        // Original file format ("rctrk", "n42", etc.)
+	Filename      string             `json:"filename,omitempty"`  // Original uploaded filename
+	RawData       []byte             `json:"-"`                   // Original spectrum file bytes for re-export
+	CreatedAt     int64              `json:"createdAt,omitempty"` // Timestamp when spectrum was stored
 }

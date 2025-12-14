@@ -19,13 +19,25 @@ func (db *Database) StreamMarkersByZoomAndBounds(ctx context.Context, zoom int, 
 		switch dbType {
 		case "pgx":
 			query = `
-                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID
+                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
+                       COALESCE(altitude, 0) as altitude,
+                       COALESCE(detector, '') as detector,
+                       COALESCE(radiation, '') as radiation,
+                       COALESCE(temperature, 0) as temperature,
+                       COALESCE(humidity, 0) as humidity,
+                       COALESCE(has_spectrum, FALSE) as has_spectrum
                 FROM markers
                 WHERE zoom = $1 AND lat BETWEEN $2 AND $3 AND lon BETWEEN $4 AND $5;
             `
 		default:
 			query = `
-                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID
+                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
+                       COALESCE(altitude, 0) as altitude,
+                       COALESCE(detector, '') as detector,
+                       COALESCE(radiation, '') as radiation,
+                       COALESCE(temperature, 0) as temperature,
+                       COALESCE(humidity, 0) as humidity,
+                       COALESCE(has_spectrum, 0) as has_spectrum
                 FROM markers
                 WHERE zoom = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?;
             `
@@ -40,7 +52,8 @@ func (db *Database) StreamMarkersByZoomAndBounds(ctx context.Context, zoom int, 
 
 		for rows.Next() {
 			var m Marker
-			if err := rows.Scan(&m.ID, &m.DoseRate, &m.Date, &m.Lon, &m.Lat, &m.CountRate, &m.Zoom, &m.Speed, &m.TrackID); err != nil {
+			if err := rows.Scan(&m.ID, &m.DoseRate, &m.Date, &m.Lon, &m.Lat, &m.CountRate, &m.Zoom, &m.Speed, &m.TrackID,
+				&m.Altitude, &m.Detector, &m.Radiation, &m.Temperature, &m.Humidity, &m.HasSpectrum); err != nil {
 				errCh <- fmt.Errorf("scan marker: %w", err)
 				return
 			}
@@ -74,13 +87,25 @@ func (db *Database) StreamMarkersByTrackIDZoomAndBounds(ctx context.Context, tra
 		switch dbType {
 		case "pgx":
 			query = `
-                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID
+                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
+                       COALESCE(altitude, 0) as altitude,
+                       COALESCE(detector, '') as detector,
+                       COALESCE(radiation, '') as radiation,
+                       COALESCE(temperature, 0) as temperature,
+                       COALESCE(humidity, 0) as humidity,
+                       COALESCE(has_spectrum, FALSE) as has_spectrum
                 FROM markers
                 WHERE trackID = $1 AND zoom = $2 AND lat BETWEEN $3 AND $4 AND lon BETWEEN $5 AND $6;
             `
 		default:
 			query = `
-                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID
+                SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
+                       COALESCE(altitude, 0) as altitude,
+                       COALESCE(detector, '') as detector,
+                       COALESCE(radiation, '') as radiation,
+                       COALESCE(temperature, 0) as temperature,
+                       COALESCE(humidity, 0) as humidity,
+                       COALESCE(has_spectrum, 0) as has_spectrum
                 FROM markers
                 WHERE trackID = ? AND zoom = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?;
             `
@@ -95,7 +120,8 @@ func (db *Database) StreamMarkersByTrackIDZoomAndBounds(ctx context.Context, tra
 
 		for rows.Next() {
 			var m Marker
-			if err := rows.Scan(&m.ID, &m.DoseRate, &m.Date, &m.Lon, &m.Lat, &m.CountRate, &m.Zoom, &m.Speed, &m.TrackID); err != nil {
+			if err := rows.Scan(&m.ID, &m.DoseRate, &m.Date, &m.Lon, &m.Lat, &m.CountRate, &m.Zoom, &m.Speed, &m.TrackID,
+				&m.Altitude, &m.Detector, &m.Radiation, &m.Temperature, &m.Humidity, &m.HasSpectrum); err != nil {
 				errCh <- fmt.Errorf("scan marker: %w", err)
 				return
 			}
