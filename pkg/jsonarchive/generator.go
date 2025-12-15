@@ -347,7 +347,7 @@ func buildArchive(ctx context.Context, db *database.Database, dbType, destPath s
 	gz := gzip.NewWriter(counter)
 	tarw := tar.NewWriter(gz)
 
-	totalTracks, err := db.CountTracks(ctx)
+	totalTracks, err := db.CountTracks(ctx, dbType)
 	if err != nil {
 		tarw.Close()
 		gz.Close()

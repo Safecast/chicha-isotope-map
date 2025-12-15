@@ -176,12 +176,21 @@ ORDER BY trackID%s;`, strings.Join(conditions, " AND "), limitClause)
 // pagination sequence so they can plan how many requests to issue. We count all
 // markers regardless of zoom so archive exports never miss tracks whose data
 // arrived with differing zoom levels.
-func (db *Database) CountTracks(ctx context.Context) (int64, error) {
+func (db *Database) CountTracks(ctx context.Context, dbType string) (int64, error) {
 	// Counting without zoom filters keeps the archive progress estimates
 	// accurate because every stored measurement contributes to the total
 	// upfront. This follows the proverb "Simplicity is complicated" by
 	// preferring a portable query that still covers all ingestion paths.
-	row := db.DB.QueryRowContext(ctx, `SELECT COUNT(DISTINCT trackID) FROM markers`)
+	//
+	// We explicitly exclude realtime "live:%" tracks so this count matches
+	// the set returned by StreamTrackSummaries, preventing archive generation
+	// failures due to mismatched totals.
+	nextPlaceholder := newPlaceholderGenerator(dbType)
+	placeholder := nextPlaceholder()
+	// Also exclude empty strings as StreamTrackSummaries uses trackID > ""
+	query := fmt.Sprintf("SELECT COUNT(DISTINCT trackID) FROM markers WHERE trackID NOT LIKE %s AND trackID <> ''", placeholder)
+
+	row := db.DB.QueryRowContext(ctx, query, "live:%")
 	var count sql.NullInt64
 	if err := row.Scan(&count); err != nil {
 		return 0, fmt.Errorf("count tracks: %w", err)

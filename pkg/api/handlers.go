@@ -1207,7 +1207,7 @@ func (h *Handler) latestTrackInfo(ctx context.Context) (int64, string, error) {
 		}
 	}
 
-	total, err := h.DB.CountTracks(ctx)
+	total, err := h.DB.CountTracks(ctx, h.DBType)
 	if err != nil {
 		return 0, "", err
 	}

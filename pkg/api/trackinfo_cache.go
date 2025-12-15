@@ -278,7 +278,7 @@ func (c *TrackInfoCache) loadTrackInfo(ctx context.Context) (int64, string, erro
 	if c.db == nil {
 		return 0, "", errors.New("database unavailable")
 	}
-	total, err := c.db.CountTracks(ctx)
+	total, err := c.db.CountTracks(ctx, c.dbType)
 	if err != nil {
 		return 0, "", err
 	}
