@@ -111,23 +111,42 @@ docker run -d -p 8765:8765 --name chicha-isotope-map safecastr/chicha-isotope-ma
 
 ## 📥 Import data
 - On the map page, click the green **Upload** button and drop your tracks (`.kml`, `.kmz`, `.json`, `.rctrk`, `.csv`, `.gpx`, bGeigie Nano/Zen `$BNRDD`, AtomFast, RadiaCode, Safecast, etc.).
-- Instant mirror of pelora.org: run `chicha-isotope-map -import-tgz-url https://pelora.org/api/json/weekly.tgz` once — it fetches the weekly archive, fills your database, and quits so the next launch starts fully populated.
-- Want the archive saved locally first? Download [https://pelora.org/api/json/weekly.tgz](https://pelora.org/api/json/weekly.tgz), point `-import-tgz-path /path/to/weekly.tgz`, and start with your own copy.
+- **From URL:** Run one command to fetch and import the weekly archive:
+  ```bash
+  ./chicha-isotope-map -import-tgz-url https://pelora.org/api/json/weekly.tgz
+  ```
+- **From Local File:** If you have the archive locally:
+  ```bash
+  ./chicha-isotope-map -import-tgz-file /path/to/weekly.tgz
+  ```
 
 ### 🗺️ One-command first run with live data
 For a completely fresh install, this single command both preloads real-world tracks and serves the map right away:
 ```bash
-chicha-isotope-map -import-tgz-url https://pelora.org/api/json/weekly.tgz
+./chicha-isotope-map -import-tgz-url https://pelora.org/api/json/weekly.tgz
 ```
 After it imports, rerun normally (or keep the same command in a systemd service) — the map opens with real measurements visible at [http://localhost:8765](http://localhost:8765).
 
 ### 🛢️ Database options for import and regular use
-- **PostgreSQL (`pgx`)** — the fastest and most convenient with several users. Example: `chicha-isotope-map -db-type pgx -db-conn postgres://USER:PASS@HOST:PORT/DATABASE?sslmode=allow -import-tgz-url https://pelora.org/api/json/weekly.tgz`
-- **DuckDB / SQLite / Chai** — simple file databases for a single user. Concurrent writes can conflict, so keep them for personal maps. Example: `chicha-isotope-map -db-type duckdb -import-tgz-url https://pelora.org/api/json/weekly.tgz`
+- **PostgreSQL (`pgx`)** — the fastest and most convenient with several users. Example: `./chicha-isotope-map -db-type pgx -db-conn postgres://USER:PASS@HOST:PORT/DATABASE?sslmode=allow -import-tgz-url https://pelora.org/api/json/weekly.tgz`
+- **DuckDB / SQLite / Chai** — simple file databases for a single user. Concurrent writes can conflict, so keep them for personal maps. Example: `./chicha-isotope-map -db-type duckdb -import-tgz-url https://pelora.org/api/json/weekly.tgz`
 
 ## 📤 Export
-- Single track: `/api/track/{trackID}.json` (legacy `.cim` also works).
-- Scheduled archive: `/api/json/weekly.tgz` (or `/daily.tgz`, `/monthly.tgz`, `/yearly.tgz`). Inside: one JSON per track.
+To enable the JSON archive export endpoint, you must specify a path to store the generated archive.
+
+1. **Start the server with the archive path:**
+   ```bash
+   ./chicha-isotope-map -json-archive-path .
+   ```
+   (This creates `weekly-json.tgz` in the current directory and updates it automatically).
+
+2. **Download the data:**
+   - **API Endpoint:** `http://localhost:8765/api/json/weekly.tgz`
+   - **Command Line:**
+     ```bash
+     curl -O http://localhost:8765/api/json/weekly.tgz
+     ```
+   - **Single Track:** `/api/track/{trackID}.json`
 
 ---
 

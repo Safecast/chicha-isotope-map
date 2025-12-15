@@ -338,6 +338,22 @@
     </section>
 
     <section class="card">
+      <h2>Data Replication (Import/Export)</h2>
+      <p>The server includes built-in CLI tools to import and export the full dataset. While the API serves the data, these flags control the flow.</p>
+
+      <h3>Exporting Data</h3>
+      <p>To enable the <code>/api/json/weekly.tgz</code> endpoint shown above, you must start the server with the <code>-json-archive-path</code> flag:</p>
+      <pre>./chicha-isotope-map -json-archive-path .</pre>
+      <p>This will generate (and periodically update) a <code>weekly-json.tgz</code> file in your current directory, making it available for download.</p>
+
+      <h3>Importing Data</h3>
+      <p>To populate your node with an existing archive (e.g. from the central node at <code>pelora.org</code>), use the import flags. This will download the data, fill your database, and then exit:</p>
+      <pre>./chicha-isotope-map -import-tgz-url https://pelora.org/api/json/weekly.tgz</pre>
+      <p>Or if you have the file locally:</p>
+      <pre>./chicha-isotope-map -import-tgz-file /path/to/backup.tgz</pre>
+    </section>
+
+    <section class="card">
       <h2>Rate limiting &amp; conventions</h2>
       <ul>
         <li>Responses may include <code>X-RateLimit-Notice</code> and <code>X-RateLimit-Delay</code> headers when the per-IP queue slows requests for fairness.</li>
