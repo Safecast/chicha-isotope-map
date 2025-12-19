@@ -1712,21 +1712,15 @@ body, html {
       let radiationSteps = schemeSafecast;
 
       function getGradientColor(doseRate) {
-          if (currentColoring === 'chicha') {
-            // Step-based logic for Chicha (no interpolation for discrete safety bins)
-            if (doseRate < 0.11) return `rgb(${schemeChicha[0].color.join(',')})`;
-            if (doseRate < 0.30) return `rgb(${schemeChicha[1].color.join(',')})`;
-            if (doseRate < 1.00) return `rgb(${schemeChicha[2].color.join(',')})`;
-            return `rgb(${schemeChicha[3].color.join(',')})`;
-          }
+          // Use interpolation for both schemes to provide a smooth gradient
+          const steps = (currentColoring === 'chicha') ? schemeChicha : schemeSafecast;
 
-          // Default gradient logic for Safecast
-          if (doseRate <= radiationSteps[0].uSv) return `rgb(${radiationSteps[0].color.join(',')})`;
-          if (doseRate >= radiationSteps[radiationSteps.length-1].uSv) return `rgb(${radiationSteps[radiationSteps.length-1].color.join(',')})`;
+          if (doseRate <= steps[0].uSv) return `rgb(${steps[0].color.join(',')})`;
+          if (doseRate >= steps[steps.length-1].uSv) return `rgb(${steps[steps.length-1].color.join(',')})`;
 
-          for (let i = 0; i < radiationSteps.length - 1; i++) {
-              const lower = radiationSteps[i];
-              const upper = radiationSteps[i+1];
+          for (let i = 0; i < steps.length - 1; i++) {
+              const lower = steps[i];
+              const upper = steps[i+1];
               if (doseRate >= lower.uSv && doseRate <= upper.uSv) {
                   return interpolateColor(lower.color, upper.color, (doseRate - lower.uSv) / (upper.uSv - lower.uSv));
               }
@@ -2412,44 +2406,41 @@ var currentUnit = loadUnitPreference();
  * This updates both the range labels in the compact legend.
  */
 function updateLegendDisplay() {
-  const isUSv = (currentUnit === 'uSv');
-  const unitLabel = document.getElementById('legend-unit-label');
+  var isUSv = (currentUnit === 'uSv');
+  var unitLabel = document.getElementById('legend-unit-label');
   if (unitLabel) unitLabel.textContent = isUSv ? 'µSv/h' : 'µR/h';
 
-  const bar = document.getElementById('legend-bar');
-  const labelsContainer = document.getElementById('legend-labels');
-  const legendBox = document.getElementById('legend');
+  var bar = document.getElementById('legend-bar');
+  var labelsContainer = document.getElementById('legend-labels');
+  var legendBox = document.getElementById('legend');
   if (!bar || !labelsContainer || !legendBox) return;
 
-  // Adjust height based on coloring scheme
-  legendBox.style.height = (currentColoring === 'chicha') ? '180px' : '500px';
+  // Use local refs to ensure we have valid data
+  var steps = (typeof currentColoring !== 'undefined' && currentColoring === 'chicha') ? schemeChicha : schemeSafecast;
+  
+  // Set height
+  legendBox.style.height = (typeof currentColoring !== 'undefined' && currentColoring === 'chicha') ? '180px' : '500px';
 
-  // Update gradient bar
-  let gradient;
-  if (currentColoring === 'chicha') {
-    // Sharp transitions for discrete bins
-    const stops = [];
-    schemeChicha.forEach((s, i) => {
-      const pctLow = (i / schemeChicha.length) * 100;
-      const pctHigh = ((i + 1) / schemeChicha.length) * 100;
-      const col = `rgb(${s.color.join(',')})`;
-      stops.push(`${col} ${pctLow}%`);
-      stops.push(`${col} ${pctHigh}%`);
-    });
-    gradient = `linear-gradient(to top, ${stops.join(', ')})`;
-  } else {
-    // Smooth transitions for gradient
-    const colors = schemeSafecast.map(s => `rgb(${s.color.join(',')})`);
-    gradient = `linear-gradient(to top, ${colors.join(', ')})`;
+  // Build gradient string manually for maximum compatibility
+  var colorStrings = [];
+  for (var i = 0; i < steps.length; i++) {
+    colorStrings.push('rgb(' + steps[i].color.join(',') + ')');
   }
-  bar.style.background = gradient;
+  
+  // Apply gradient
+  var gradientStyle = 'linear-gradient(to top, ' + colorStrings.join(', ') + ')';
+  bar.style.backgroundImage = gradientStyle;
+  bar.style.backgroundColor = '#333';
+  bar.style.height = '100%';
 
   // Update labels
   labelsContainer.innerHTML = '';
-  const stepsToRender = [...radiationSteps].reverse();
-  stepsToRender.forEach((step) => {
-    const el = document.createElement('span');
-    let val = step.uSv;
+  // Clone and reverse without spread for compatibility
+  var stepsToRender = steps.slice().reverse();
+  for (var j = 0; j < stepsToRender.length; j++) {
+    var step = stepsToRender[j];
+    var el = document.createElement('span');
+    var val = step.uSv;
     if (!isUSv) {
        val = val * 100;
        if (val >= 100) val = Math.round(val);
@@ -2458,7 +2449,7 @@ function updateLegendDisplay() {
     }
     el.textContent = val;
     labelsContainer.appendChild(el);
-  });
+  }
 }
 
 /**
@@ -2665,7 +2656,19 @@ document.addEventListener('DOMContentLoaded', function () {
   if (legendBox) {
     var legendHandle = attachControlTooltip(legendBox, {
       placement: 'left',
-      content: function () { return translate('legend_button_tooltip'); },
+      content: function () { 
+        var key = (typeof currentColoring !== 'undefined' && currentColoring === 'chicha') 
+          ? 'legend_button_tooltip_chicha' 
+          : 'legend_button_tooltip_safecast';
+        var txt = translate(key);
+        // Fallback if translations not reloaded
+        if (txt === key) {
+          return (key === 'legend_button_tooltip_chicha') 
+            ? "Chicha radiation safety legend" 
+            : "Safecast radiation safety legend";
+        }
+        return txt;
+      },
       maxWidth: 300,
     });
     window.__hideLegendHint = legendHandle.hide;
