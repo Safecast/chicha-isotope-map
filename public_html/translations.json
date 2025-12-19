@@ -651,6 +651,7 @@
   },
   "en": {
     "api_example_archive_desc": "Downloads a tgz bundle with every published .json file when the server enables the JSON archive.",
+    "legend_safecast_desc": "Safecast high-resolution radiation gradient (15 steps). Colors represent dose rates based on international background radiation standards.",
     "api_example_archive_link": "Download weekly archive",
     "api_example_archive_note": "If archives are disabled the server returns HTTP 404 Not Found.",
     "api_example_archive_title": "Weekly archive bundle",

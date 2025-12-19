@@ -1374,23 +1374,8 @@ body, html {
   font-family: var(--font-family-base);
   height: 500px;
   display: flex;">
-    <div style="width:24px; margin-right:8px; border-radius:12px; border: 1px solid rgba(0,0,0,0.2); background:linear-gradient(to top, rgb(0,0,139), rgb(0,71,171), rgb(65,105,225), rgb(135,206,250), rgb(0,191,255), rgb(0,255,255), rgb(64,224,208), rgb(147,112,219), rgb(186,85,211), rgb(255,0,255), rgb(255,20,147), rgb(255,0,0), rgb(255,69,0), rgb(255,165,0), rgb(255,255,0));"></div>
-    <div style="display:flex; flex-direction:column; justify-content:space-between; height:100%; font-weight:bold; min-width:35px; text-align:left;">
-      <span id="legend-val-14"></span>
-      <span id="legend-val-13"></span>
-      <span id="legend-val-12"></span>
-      <span id="legend-val-11"></span>
-      <span id="legend-val-10"></span>
-      <span id="legend-val-9"></span>
-      <span id="legend-val-8"></span>
-      <span id="legend-val-7"></span>
-      <span id="legend-val-6"></span>
-      <span id="legend-val-5"></span>
-      <span id="legend-val-4"></span>
-      <span id="legend-val-3"></span>
-      <span id="legend-val-2"></span>
-      <span id="legend-val-1"></span>
-      <span id="legend-val-0"></span>
+    <div id="legend-bar" style="width:24px; margin-right:8px; border-radius:12px; border: 1px solid rgba(0,0,0,0.2);"></div>
+    <div id="legend-labels" style="display:flex; flex-direction:column; justify-content:space-between; height:100%; font-weight:bold; min-width:35px; text-align:left;">
     </div>
     <div style="position:absolute; bottom:20px;right:5px;width:100%;text-align:center; font-size:15px; font-weight:bold; color:var(--modal-text); text-shadow: 0 0 2px var(--control-bg);">
        <span id="legend-unit-label">µSv/h</span>
@@ -1697,7 +1682,7 @@ body, html {
       // Compute marker color from radiation level
       // Based on world background radiation baseline of ~0.10 µSv/h (external only)
       // Defined globally for Map and Legend usage - 15 step scale
-      const radiationSteps = [
+      const schemeSafecast = [
         { uSv: 0.03, color: [0, 0, 139] },    // DarkBlue
         { uSv: 0.05, color: [0, 71, 171] },   // Cobalt
         { uSv: 0.08, color: [65, 105, 225] }, // RoyalBlue
@@ -1715,7 +1700,27 @@ body, html {
         { uSv: 65.54, color: [255, 255, 0] }  // Yellow
       ];
 
+      const schemeChicha = [
+        { uSv: 0.00, color: [0, 128, 0] },   // Green (0-11 uR/h)
+        { uSv: 0.11, color: [255, 215, 0] }, // Yellow (11-30 uR/h)
+        { uSv: 0.30, color: [255, 69, 0] },  // Red (30-100 uR/h)
+        { uSv: 1.00, color: [0, 0, 0] }      // Black (>100 uR/h)
+      ];
+
+      // Global refs
+      let currentColoring = 'safecast'; 
+      let radiationSteps = schemeSafecast;
+
       function getGradientColor(doseRate) {
+          if (currentColoring === 'chicha') {
+            // Step-based logic for Chicha (no interpolation for discrete safety bins)
+            if (doseRate < 0.11) return `rgb(${schemeChicha[0].color.join(',')})`;
+            if (doseRate < 0.30) return `rgb(${schemeChicha[1].color.join(',')})`;
+            if (doseRate < 1.00) return `rgb(${schemeChicha[2].color.join(',')})`;
+            return `rgb(${schemeChicha[3].color.join(',')})`;
+          }
+
+          // Default gradient logic for Safecast
           if (doseRate <= radiationSteps[0].uSv) return `rgb(${radiationSteps[0].color.join(',')})`;
           if (doseRate >= radiationSteps[radiationSteps.length-1].uSv) return `rgb(${radiationSteps[radiationSteps.length-1].color.join(',')})`;
 
@@ -2383,6 +2388,22 @@ function saveUnitPreference(unit) {
   }
 }
 
+function saveColoringPreference(coloring) {
+  try {
+    localStorage.setItem('coloringPreference', coloring);
+  } catch (e) {
+    console.error('Failed to save coloring preference:', e);
+  }
+}
+
+function loadColoringPreference() {
+  try {
+    return localStorage.getItem('coloringPreference') || 'safecast';
+  } catch (e) {
+    return 'safecast';
+  }
+}
+
 // Global unit preference - initialized on page load
 var currentUnit = loadUnitPreference();
 
@@ -2395,21 +2416,48 @@ function updateLegendDisplay() {
   const unitLabel = document.getElementById('legend-unit-label');
   if (unitLabel) unitLabel.textContent = isUSv ? 'µSv/h' : 'µR/h';
 
-  // radiationSteps is defined globally near getGradientColor
-  radiationSteps.forEach((step, index) => {
-    const el = document.getElementById('legend-val-' + index);
-    if (!el) return;
-    
+  const bar = document.getElementById('legend-bar');
+  const labelsContainer = document.getElementById('legend-labels');
+  const legendBox = document.getElementById('legend');
+  if (!bar || !labelsContainer || !legendBox) return;
+
+  // Adjust height based on coloring scheme
+  legendBox.style.height = (currentColoring === 'chicha') ? '180px' : '500px';
+
+  // Update gradient bar
+  let gradient;
+  if (currentColoring === 'chicha') {
+    // Sharp transitions for discrete bins
+    const stops = [];
+    schemeChicha.forEach((s, i) => {
+      const pctLow = (i / schemeChicha.length) * 100;
+      const pctHigh = ((i + 1) / schemeChicha.length) * 100;
+      const col = `rgb(${s.color.join(',')})`;
+      stops.push(`${col} ${pctLow}%`);
+      stops.push(`${col} ${pctHigh}%`);
+    });
+    gradient = `linear-gradient(to top, ${stops.join(', ')})`;
+  } else {
+    // Smooth transitions for gradient
+    const colors = schemeSafecast.map(s => `rgb(${s.color.join(',')})`);
+    gradient = `linear-gradient(to top, ${colors.join(', ')})`;
+  }
+  bar.style.background = gradient;
+
+  // Update labels
+  labelsContainer.innerHTML = '';
+  const stepsToRender = [...radiationSteps].reverse();
+  stepsToRender.forEach((step) => {
+    const el = document.createElement('span');
     let val = step.uSv;
     if (!isUSv) {
-       // Convert to µR/h (approx factor 100)
        val = val * 100;
-       // Rounding for clean display
        if (val >= 100) val = Math.round(val);
        else if (val >= 10) val = parseFloat(val.toFixed(1));
        else val = parseFloat(val.toFixed(2));
     }
     el.textContent = val;
+    labelsContainer.appendChild(el);
   });
 }
 
@@ -5737,6 +5785,44 @@ function loadMapFromUrl() {
   const layer = decodeURIComponent(params.get('layer') || (storedView && storedView.layer) || defaultCfg.layer);
   setBaseLayer(layer);
 
+  /* coloring scheme from URL or local storage */
+  const coloringParam = params.get('coloring');
+  if (coloringParam === 'chicha' || coloringParam === 'safecast') {
+    currentColoring = coloringParam;
+    saveColoringPreference(currentColoring);
+  } else {
+    currentColoring = loadColoringPreference();
+  }
+  radiationSteps = (currentColoring === 'chicha') ? schemeChicha : schemeSafecast;
+
+  /* language from URL */
+  const langParam = params.get('lang');
+  if (langParam && translations[langParam]) {
+    currentLang = langParam;
+  }
+
+  /* unit (coloring) from URL or local storage */
+  const unitParam = params.get('unit');
+  if (unitParam === 'uSv' || unitParam === 'uR') {
+    currentUnit = unitParam;
+    saveUnitPreference(currentUnit);
+  } else {
+    currentUnit = loadUnitPreference();
+  }
+  updateLegendDisplay();
+
+  /* legend visibility from URL */
+  const legendParam = params.get('legend');
+  const legendBox = document.getElementById('legend');
+  const unitToggle = document.getElementById('unitToggle');
+  if (legendParam === '0') {
+    if (legendBox) legendBox.style.display = 'none';
+    if (unitToggle) unitToggle.style.display = 'none';
+  } else if (legendParam === '1') {
+    if (legendBox) legendBox.style.display = 'flex';
+    if (unitToggle) unitToggle.style.display = 'block';
+  }
+
   /* read remaining params */
   const minLat = parseFloat(params.get('minLat'));
   const minLon = parseFloat(params.get('minLon'));
@@ -5767,7 +5853,10 @@ function updateUrl() {
   var maxLon = bounds.getNorthEast().lng.toFixed(5);
   var zoom = map.getZoom();
 
-  var newUrl = `${window.location.pathname}?minLat=${minLat}&minLon=${minLon}&maxLat=${maxLat}&maxLon=${maxLon}&zoom=${zoom}&layer=${encodeURIComponent(layer)}`;
+  var legendBox = document.getElementById('legend');
+  var isLegendVisible = legendBox && legendBox.style.display !== 'none' ? '1' : '0';
+
+  var newUrl = `${window.location.pathname}?minLat=${minLat}&minLon=${minLon}&maxLat=${maxLat}&maxLon=${maxLon}&zoom=${zoom}&layer=${encodeURIComponent(layer)}&unit=${currentUnit}&legend=${isLegendVisible}&coloring=${currentColoring}&lang=${currentLang}`;
 
   window.history.replaceState({}, '', newUrl);
   saveMapViewState();
@@ -6226,6 +6315,15 @@ function centerMapToLocation() {
 <script>
   // Build legend HTML with color squares for tooltip and modal.
   function buildLegendHTML(lang) {
+    if (currentColoring === 'safecast') {
+      var desc = translate('legend_safecast_desc');
+      if (desc === 'legend_safecast_desc') {
+        desc = "Safecast high-resolution radiation gradient (15 steps). Colors represent dose rates based on international background radiation standards.";
+      }
+      return '<p>' + desc + '</p>';
+    }
+
+    // Chicha 4-bin logic
     var key = 'legend_full_' + lang;
     var txt = translate(key);
     var parts = txt.split('\n\n');
@@ -6237,6 +6335,7 @@ function centerMapToLocation() {
     }
     return parts.map(function(p){
       var lines = p.split('\n').map(function(line){
+        // These thresholds are matched by text in translations
         if (line.includes('0–11')) return square('#008000') + stripBullet(line);
         if (line.includes('11–30')) return square('#FFD700') + stripBullet(line);
         if (line.includes('30–100')) return square('#FF4500') + stripBullet(line);
@@ -6524,6 +6623,9 @@ function centerMapToLocation() {
 
         // Refresh markers to show new units
         updateMarkers();
+
+        // Update URL to reflect the new state
+        updateUrl();
       });
     }
 
