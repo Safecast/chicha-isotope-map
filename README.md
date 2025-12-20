@@ -108,6 +108,28 @@ After it imports, rerun normally (or keep the same command in a systemd service)
 
 ---
 
+## 🔗 URL Parameters
+
+You can customize the map view by adding parameters to the URL. This is useful for sharing specific views or embedding the map.
+
+| Parameter | Options | Description |
+| :--- | :--- | :--- |
+| `coloring` | `safecast`, `chicha` | **safecast**: High-resolution 15-step gradient.<br>**chicha**: 4-bin safety scale (Green/Yellow/Red/Black). |
+| `unit` | `uSv`, `uR` | **uSv**: Microsieverts per hour (µSv/h).<br>**uR**: Microroentgen per hour (µR/h). |
+| `legend` | `1`, `0` | **1**: Show the compact legend (default).<br>**0**: Hide the legend and unit toggle. |
+| `lang` | `en`, `ru`, `ar`, etc. | Set the interface language (e.g., `lang=ru`). |
+| `layer` | `OpenStreetMap`, `Google Satellite` | Set the default base layer. |
+
+### Examples:
+- **Chicha Safety View (µR/h):**
+  `http://localhost:8765/?coloring=chicha&unit=uR`
+- **Safecast Scientific View (µSv/h):**
+  `http://localhost:8765/?coloring=safecast&unit=uSv`
+- **Clean View (No Legend):**
+  `http://localhost:8765/?legend=0`
+
+---
+
 ## 🧠 Advanced options
 - Databases: built-in SQLite by default; you can switch to DuckDB, Chai, ClickHouse, or PostgreSQL (`pgx`).
 - Import: by URL or file; you can feed an archive directly.
