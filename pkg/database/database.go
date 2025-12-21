@@ -1514,11 +1514,14 @@ CREATE TABLE IF NOT EXISTS uploads (
   upload_ip       TEXT,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   source          TEXT,
-  source_id       TEXT
+  source_id       TEXT,
+  source_url      TEXT,
+  user_id         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
+CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
 `
 
 	case "sqlite", "chai":
@@ -1610,10 +1613,13 @@ CREATE TABLE IF NOT EXISTS uploads (
   upload_ip       TEXT,
   created_at      BIGINT NOT NULL,
   source          TEXT,
-  source_id       TEXT
+  source_id       TEXT,
+  source_url      TEXT,
+  user_id         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
+CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
 `
 
 	case "duckdb":
@@ -1710,10 +1716,13 @@ CREATE TABLE IF NOT EXISTS uploads (
   upload_ip       TEXT,
   created_at      TIMESTAMP DEFAULT NOW(),
   source          TEXT,
-  source_id       TEXT
+  source_id       TEXT,
+  source_url      TEXT,
+  user_id         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
+CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
 `
 
 	case "clickhouse":
@@ -1794,7 +1803,9 @@ ORDER BY (marker_id, id);`,
   upload_ip  String,
   created_at DateTime DEFAULT now(),
   source     String,
-  source_id  String
+  source_id  String,
+  source_url String,
+  user_id    String
 ) ENGINE = MergeTree()
 ORDER BY (created_at, id);`,
 		}

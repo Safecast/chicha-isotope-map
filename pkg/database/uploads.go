@@ -15,8 +15,10 @@ type Upload struct {
 	FileSize  int64  `json:"fileSize"`
 	UploadIP  string `json:"uploadIP"`
 	CreatedAt int64  `json:"createdAt"`
-	Source    string `json:"source,omitempty"`   // Import source (e.g., "safecast-api", "user-upload")
-	SourceID  string `json:"sourceID,omitempty"` // External reference ID (e.g., Safecast import ID)
+	Source    string `json:"source,omitempty"`    // Import source (e.g., "safecast-api", "user-upload")
+	SourceID  string `json:"sourceID,omitempty"`  // External reference ID (e.g., Safecast import ID)
+	SourceURL string `json:"sourceURL,omitempty"` // Source file URL (e.g., S3 URL)
+	UserID    string `json:"userID,omitempty"`    // User ID from source (e.g., Safecast user ID)
 }
 
 // InsertUpload records a file upload in the uploads table.
@@ -33,41 +35,41 @@ func (db *Database) InsertUpload(ctx context.Context, upload Upload) (int64, err
 	switch db.Driver {
 	case "pgx":
 		query = `
-			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id)
-			VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8)
+			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id, source_url, user_id)
+			VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8, $9, $10)
 			RETURNING id
 		`
 		args = []interface{}{
 			upload.Filename, upload.FileType, upload.TrackID,
 			upload.FileSize, upload.UploadIP, createdAt,
-			upload.Source, upload.SourceID,
+			upload.Source, upload.SourceID, upload.SourceURL, upload.UserID,
 		}
 		err := db.DB.QueryRowContext(ctx, query, args...).Scan(&id)
 		return id, err
 
 	case "duckdb":
 		query = `
-			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id)
-			VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8)
+			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id, source_url, user_id)
+			VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8, $9, $10)
 			RETURNING id
 		`
 		args = []interface{}{
 			upload.Filename, upload.FileType, upload.TrackID,
 			upload.FileSize, upload.UploadIP, createdAt,
-			upload.Source, upload.SourceID,
+			upload.Source, upload.SourceID, upload.SourceURL, upload.UserID,
 		}
 		err := db.DB.QueryRowContext(ctx, query, args...).Scan(&id)
 		return id, err
 
 	case "sqlite", "chai":
 		query = `
-			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO uploads (filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id, source_url, user_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 		args = []interface{}{
 			upload.Filename, upload.FileType, upload.TrackID,
 			upload.FileSize, upload.UploadIP, createdAt,
-			upload.Source, upload.SourceID,
+			upload.Source, upload.SourceID, upload.SourceURL, upload.UserID,
 		}
 		result, err := db.DB.ExecContext(ctx, query, args...)
 		if err != nil {
@@ -80,28 +82,58 @@ func (db *Database) InsertUpload(ctx context.Context, upload Upload) (int64, err
 	}
 }
 
-// GetUploads retrieves all upload records, ordered by most recent first.
-func (db *Database) GetUploads(ctx context.Context, limit int) ([]Upload, error) {
+// GetUploads retrieves upload records, ordered by most recent first.
+// If userID is not empty, only returns uploads from that user.
+func (db *Database) GetUploads(ctx context.Context, limit int, userID string) ([]Upload, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 
-	query := `
-		SELECT id, filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id
-		FROM uploads
-		ORDER BY created_at DESC
-		LIMIT ?
-	`
-	args := []interface{}{limit}
+	var query string
+	var args []interface{}
 
-	if db.Driver == "pgx" || db.Driver == "duckdb" {
-		query = `
-			SELECT id, filename, file_type, track_id, file_size, upload_ip,
-			       EXTRACT(EPOCH FROM created_at)::BIGINT, source, source_id
-			FROM uploads
-			ORDER BY created_at DESC
-			LIMIT $1
-		`
+	if userID != "" {
+		// Filter by user_id
+		if db.Driver == "pgx" || db.Driver == "duckdb" {
+			query = `
+				SELECT id, filename, file_type, track_id, file_size, upload_ip,
+				       EXTRACT(EPOCH FROM created_at)::BIGINT, source, source_id, source_url, user_id
+				FROM uploads
+				WHERE user_id = $1
+				ORDER BY created_at DESC
+				LIMIT $2
+			`
+			args = []interface{}{userID, limit}
+		} else {
+			query = `
+				SELECT id, filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id, source_url, user_id
+				FROM uploads
+				WHERE user_id = ?
+				ORDER BY created_at DESC
+				LIMIT ?
+			`
+			args = []interface{}{userID, limit}
+		}
+	} else {
+		// No filter
+		if db.Driver == "pgx" || db.Driver == "duckdb" {
+			query = `
+				SELECT id, filename, file_type, track_id, file_size, upload_ip,
+				       EXTRACT(EPOCH FROM created_at)::BIGINT, source, source_id, source_url, user_id
+				FROM uploads
+				ORDER BY created_at DESC
+				LIMIT $1
+			`
+			args = []interface{}{limit}
+		} else {
+			query = `
+				SELECT id, filename, file_type, track_id, file_size, upload_ip, created_at, source, source_id, source_url, user_id
+				FROM uploads
+				ORDER BY created_at DESC
+				LIMIT ?
+			`
+			args = []interface{}{limit}
+		}
 	}
 
 	rows, err := db.DB.QueryContext(ctx, query, args...)
@@ -113,11 +145,11 @@ func (db *Database) GetUploads(ctx context.Context, limit int) ([]Upload, error)
 	var uploads []Upload
 	for rows.Next() {
 		var u Upload
-		var source, sourceID *string
+		var source, sourceID, sourceURL, userID *string
 		err := rows.Scan(
 			&u.ID, &u.Filename, &u.FileType, &u.TrackID,
 			&u.FileSize, &u.UploadIP, &u.CreatedAt,
-			&source, &sourceID,
+			&source, &sourceID, &sourceURL, &userID,
 		)
 		if err != nil {
 			continue
@@ -127,6 +159,12 @@ func (db *Database) GetUploads(ctx context.Context, limit int) ([]Upload, error)
 		}
 		if sourceID != nil {
 			u.SourceID = *sourceID
+		}
+		if sourceURL != nil {
+			u.SourceURL = *sourceURL
+		}
+		if userID != nil {
+			u.UserID = *userID
 		}
 		uploads = append(uploads, u)
 	}

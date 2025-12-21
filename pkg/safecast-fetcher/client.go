@@ -13,6 +13,7 @@ import (
 type SafecastImport struct {
 	ID                int64     `json:"id"`
 	SourceURL         string    // Extracted from nested source.url
+	UserID            int64     `json:"user_id"`
 	Approved          bool      `json:"approved"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -31,6 +32,7 @@ type sourceWrapper struct {
 type safecastImportRaw struct {
 	ID                int64         `json:"id"`
 	Source            sourceWrapper `json:"source"`
+	UserID            int64         `json:"user_id"`
 	Approved          bool          `json:"approved"`
 	CreatedAt         time.Time     `json:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at"`
@@ -69,6 +71,7 @@ func (c *Client) FetchApprovedImports(ctx context.Context, uploadedAfter string,
 
 	query := u.Query()
 	query.Set("status", "approved")
+	query.Set("order", "created_at desc")
 	if uploadedAfter != "" {
 		query.Set("uploaded_after", uploadedAfter)
 	}
@@ -106,6 +109,7 @@ func (c *Client) FetchApprovedImports(ctx context.Context, uploadedAfter string,
 		imports = append(imports, SafecastImport{
 			ID:                raw.ID,
 			SourceURL:         raw.Source.URL,
+			UserID:            raw.UserID,
 			Approved:          raw.Approved,
 			CreatedAt:         raw.CreatedAt,
 			UpdatedAt:         raw.UpdatedAt,

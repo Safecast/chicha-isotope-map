@@ -164,6 +164,90 @@ The `-safecast-fetcher-start-date` flag can be changed at any time:
 
 The system tracks which files have been imported, so changing the date won't cause re-imports.
 
+## Admin Interface
+
+### Manual Import Feature
+
+In addition to the automatic background fetcher, the admin uploads page provides a manual import interface for on-demand imports from the Safecast API.
+
+#### Accessing the Admin Page
+
+Navigate to the admin uploads page:
+```
+http://your-server:8765/api/admin/uploads?password=your-admin-password
+```
+
+#### Using the Manual Import Form
+
+The admin page includes an "Import from Safecast API" form with the following features:
+
+**Date Range Selection:**
+- **Start Date**: Select the earliest upload date to import from
+- **End Date**: Select the latest upload date to import from
+- Both dates are required and validated (start date must be before end date)
+
+**Import Process:**
+1. Select your desired date range using the date pickers
+2. Click the "Import" button to start the process
+3. The system will:
+   - Fetch all approved imports from the Safecast API within the date range
+   - Check for duplicates (skip already-imported files)
+   - Download and import each new file
+   - Display real-time progress and results
+
+**Import Results:**
+After completion, you'll see a summary showing:
+- Number of files successfully imported
+- Number of files skipped (already imported)
+- Number of errors encountered
+- The page will automatically refresh to show the new uploads
+
+#### Use Cases for Manual Import
+
+**Historical Data Catch-Up:**
+Import a specific time period of historical data:
+```
+Start Date: 2025-01-01
+End Date: 2025-01-31
+```
+
+**Targeted Import After Downtime:**
+If the auto-fetcher was disabled, manually import missed files:
+```
+Start Date: 2025-12-01
+End Date: 2025-12-20
+```
+
+**Testing and Verification:**
+Import a small date range to test the system:
+```
+Start Date: 2025-12-20
+End Date: 2025-12-21
+```
+
+#### Manual vs Automatic Import
+
+| Feature | Manual Import | Auto-Fetcher |
+|---------|--------------|--------------|
+| **Trigger** | User-initiated via admin page | Automatic every N minutes |
+| **Date Range** | User-specified range | Only new files since last run |
+| **Batch Size** | All files in range (no limit) | Configurable batch size limit |
+| **Use Case** | Historical catch-up, testing | Continuous synchronization |
+| **Deduplication** | Same system (source_id check) | Same system (source_id check) |
+
+**Best Practice:** Use manual import for historical data or catch-up scenarios, and enable the auto-fetcher for ongoing synchronization.
+
+#### Supported bGeigie Formats
+
+The import system supports all bGeigie log format variants:
+- **$BNRDD** - bGeigie Nano (standard format)
+- **$BMRDD** - bGeigie Mini
+- **$BNXRDD** - bGeigie NX
+- **$CZRDD** - Czech bGeigie variant
+- Other variants following the RDD format pattern
+
+Files are automatically detected and parsed regardless of the specific variant used.
+
 ## Logging and Monitoring
 
 ### Log Format

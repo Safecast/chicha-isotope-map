@@ -863,7 +863,8 @@ func processBGeigieZenFile(
 	skipped := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || !strings.HasPrefix(line, "$BNRDD") {
+		// Accept all bGeigie format variants: $BNRDD, $BMRDD, $BNXRDD, $CZRDD, etc.
+		if line == "" || !strings.HasPrefix(line, "$") || !strings.Contains(line, "RDD") {
 			skipped++
 			continue
 		}
@@ -942,7 +943,7 @@ func processBGeigieZenFile(
 		return database.Bounds{}, trackID, err
 	}
 	if len(markers) == 0 {
-		return database.Bounds{}, trackID, fmt.Errorf("no valid $BNRDD points found (parsed=%d skipped=%d)", parsed, skipped)
+		return database.Bounds{}, trackID, fmt.Errorf("no valid bGeigie data points found (parsed=%d skipped=%d)", parsed, skipped)
 	}
 
 	bbox, trackID, err := processAndStoreMarkers(markers, trackID, db, dbType)
@@ -4688,8 +4689,11 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get user_id filter parameter
+	userID := r.URL.Query().Get("user_id")
+
 	ctx := r.Context()
-	uploads, err := db.GetUploads(ctx, limit)
+	uploads, err := db.GetUploads(ctx, limit, userID)
 	if err != nil {
 		log.Printf("Error fetching uploads: %v", err)
 		http.Error(w, "Failed to fetch uploads", http.StatusInternalServerError)
@@ -4759,9 +4763,12 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
 		h1 { color: var(--text-primary); }
-		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
-		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); display: flex; align-items: center; justify-content: space-between; }
+		.nav-left { display: flex; align-items: center; gap: 15px; }
+		.nav a { color: var(--link-color); text-decoration: none; }
 		.nav a:hover { text-decoration: underline; }
+		.back-to-map-btn { background: #2196F3 !important; color: white !important; padding: 8px 16px; border-radius: 4px; text-decoration: none !important; font-weight: 500; transition: background 0.2s; }
+		.back-to-map-btn:hover { background: #1976D2 !important; text-decoration: none !important; }
 		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
 		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
 		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
@@ -4785,18 +4792,56 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		.sortable.desc::after { content: '▼'; opacity: 1; }
 		.filter-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 0.85em; box-sizing: border-box; }
 		.filter-row th { background: var(--bg-card); padding: 8px 12px; }
+		.import-form { background: var(--bg-card); padding: 20px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
+		.import-form h3 { margin-top: 0; color: var(--text-primary); }
+		.form-row { display: flex; gap: 15px; align-items: flex-end; margin-top: 15px; }
+		.form-group { flex: 1; }
+		.form-group label { display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9em; font-weight: 500; }
+		.form-group input[type="date"] { width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-primary); font-size: 1em; }
+		.import-btn { background: #2196F3; color: white; border: none; padding: 10px 24px; border-radius: 3px; cursor: pointer; font-size: 1em; font-weight: 500; }
+		.import-btn:hover { background: #1976D2; }
+		.import-btn:disabled { background: #ccc; cursor: not-allowed; }
+		.import-status { margin-top: 15px; padding: 12px; border-radius: 3px; display: none; }
+		.import-status.success { background: #4CAF50; color: white; }
+		.import-status.error { background: #f44336; color: white; }
+		.import-status.info { background: #2196F3; color: white; }
 	</style>
 </head>
 <body>
 	<h1>📁 File Uploads Administration</h1>
 	<div class="nav">
-		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
-		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
-		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		<div class="nav-left">
+			<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+			<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+			<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		</div>
+		<a href="/" class="back-to-map-btn">🗺️ Back to Map</a>
+	</div>
+	<div class="import-form">
+		<h3>📥 Import from Safecast API</h3>
+		<div class="form-row">
+			<div class="form-group">
+				<label for="startDate">Start Date</label>
+				<input type="date" id="startDate" required>
+			</div>
+			<div class="form-group">
+				<label for="endDate">End Date</label>
+				<input type="date" id="endDate" required>
+			</div>
+			<button class="import-btn" onclick="importFromAPI()" id="importBtn">Import</button>
+		</div>
+		<div class="import-status" id="importStatus"></div>
 	</div>
 	<div class="summary">
-		<strong>Total Uploads:</strong> ` + strconv.Itoa(len(uploads)) + ` files (showing up to ` + strconv.Itoa(limit) + `)
+		<strong>Total Uploads:</strong> ` + strconv.Itoa(len(uploads)) + ` files (showing up to ` + strconv.Itoa(limit) + `)`
+
+	if userID != "" {
+		html += ` | <strong>Filtered by User ID:</strong> ` + userID + ` <a href="/api/admin/uploads?password=` + password + `">[Clear Filter]</a>`
+	}
+
+	html += `
 	</div>`
+
 
 	if len(uploads) == 0 {
 		html += `<div class="empty">No uploads found. Upload a spectrum file (.n42 or .spe) to see it appear here.</div>`
@@ -4812,8 +4857,9 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th class="sortable" onclick="sortTable(4)" data-type="text">Track ID</th>
 				<th class="sortable" onclick="sortTable(5)" data-type="text">Size</th>
 				<th class="sortable" onclick="sortTable(6)" data-type="text">Source</th>
-				<th class="sortable" onclick="sortTable(7)" data-type="text">Upload IP</th>
-				<th class="sortable" onclick="sortTable(8)" data-type="date">Upload Time</th>
+				<th class="sortable" onclick="sortTable(7)" data-type="text">User ID</th>
+				<th class="sortable" onclick="sortTable(8)" data-type="text">Upload IP</th>
+				<th class="sortable" onclick="sortTable(9)" data-type="date">Upload Time</th>
 				<th>Actions</th>
 			</tr>
 			<tr class="filter-row">
@@ -4824,6 +4870,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Size..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Source..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="User ID..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="IP..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
 				<th></th>
@@ -4839,10 +4886,22 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 			sourceDisplay := "manual"
 			if upload.Source != "" {
 				if upload.SourceID != "" {
-					sourceDisplay = fmt.Sprintf("%s (#%s)", upload.Source, upload.SourceID)
+					if upload.SourceURL != "" {
+						sourceDisplay = fmt.Sprintf(`%s (<a href="%s" target="_blank">#%s</a>)`,
+							upload.Source, upload.SourceURL, upload.SourceID)
+					} else {
+						sourceDisplay = fmt.Sprintf("%s (#%s)", upload.Source, upload.SourceID)
+					}
 				} else {
 					sourceDisplay = upload.Source
 				}
+			}
+
+			// Format user ID display
+			userIDDisplay := "-"
+			if upload.UserID != "" {
+				userIDDisplay = fmt.Sprintf(`<a href="/api/admin/uploads?password=%s&user_id=%s">%s</a>`,
+					password, upload.UserID, upload.UserID)
 			}
 
 			html += fmt.Sprintf(`
@@ -4855,6 +4914,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<td class="filesize">%s</td>
 				<td class="source">%s</td>
 				<td>%s</td>
+				<td>%s</td>
 				<td class="datetime">%s</td>
 				<td><button class="delete-btn" onclick="deleteTrack('%s')">Delete</button></td>
 			</tr>`,
@@ -4865,6 +4925,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				upload.TrackID, upload.TrackID,
 				fileSize,
 				sourceDisplay,
+				userIDDisplay,
 				upload.UploadIP,
 				uploadTime,
 				upload.TrackID,
@@ -5035,6 +5096,60 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 			// Update delete button after filtering
 			updateDeleteButton();
 		}
+
+		// Import from Safecast API
+		async function importFromAPI() {
+			const startDate = document.getElementById('startDate').value;
+			const endDate = document.getElementById('endDate').value;
+			const status = document.getElementById('importStatus');
+			const btn = document.getElementById('importBtn');
+
+			if (!startDate || !endDate) {
+				status.className = 'import-status error';
+				status.style.display = 'block';
+				status.textContent = 'Please select both start and end dates';
+				return;
+			}
+
+			if (new Date(startDate) > new Date(endDate)) {
+				status.className = 'import-status error';
+				status.style.display = 'block';
+				status.textContent = 'Start date must be before end date';
+				return;
+			}
+
+			btn.disabled = true;
+			status.className = 'import-status info';
+			status.style.display = 'block';
+			status.textContent = 'Starting import...';
+
+			const password = new URLSearchParams(window.location.search).get('password');
+
+			try {
+				const response = await fetch('/api/admin/import-from-safecast?password=' + password, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ start_date: startDate, end_date: endDate })
+				});
+
+				const data = await response.json();
+
+				if (data.status === 'success') {
+					status.className = 'import-status success';
+					status.textContent = 'Import complete! ' + data.imported + ' files imported, ' +
+					                     data.skipped + ' skipped, ' + data.errors + ' errors';
+					setTimeout(() => window.location.reload(), 2000);
+				} else {
+					status.className = 'import-status error';
+					status.textContent = 'Error: ' + (data.error || 'Unknown error');
+					btn.disabled = false;
+				}
+			} catch (err) {
+				status.className = 'import-status error';
+				status.textContent = 'Error: ' + err.message;
+				btn.disabled = false;
+			}
+		}
 	</script>
 </body>
 </html>`
@@ -5191,6 +5306,160 @@ func adminDeleteMultipleTracksHandler(w http.ResponseWriter, r *http.Request) {
 			"deleted": deleted,
 		})
 	}
+}
+
+// adminImportFromSafecastHandler manually imports files from Safecast API for a date range.
+// POST /api/admin/import-from-safecast?password=xxx
+// Body: {"start_date": "2025-01-01", "end_date": "2025-01-31"}
+func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if admin password is set
+	if *adminPassword == "" {
+		http.Error(w, "Admin endpoints are disabled", http.StatusForbidden)
+		return
+	}
+
+	// Verify password from query param
+	password := r.URL.Query().Get("password")
+	if password != *adminPassword {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if db == nil || db.DB == nil {
+		http.Error(w, "Database not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Parse request
+	var req struct {
+		StartDate string `json:"start_date"`
+		EndDate   string `json:"end_date"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate dates
+	if req.StartDate == "" || req.EndDate == "" {
+		http.Error(w, "start_date and end_date are required", http.StatusBadRequest)
+		return
+	}
+
+	// Import files from Safecast API
+	ctx := r.Context()
+	client := safecastfetcher.NewClient()
+
+	var allImports []safecastfetcher.SafecastImport
+	imported := 0
+	skipped := 0
+	errors := 0
+
+	// Fetch imports page by page
+	for page := 1; page <= 100; page++ { // Safety limit
+		imports, err := client.FetchApprovedImports(ctx, req.StartDate, page)
+		if err != nil {
+			log.Printf("[admin-import] Error fetching page %d: %v", page, err)
+			break
+		}
+
+		if len(imports) == 0 {
+			break
+		}
+
+		// Filter by date range
+		endTime, _ := time.Parse("2006-01-02", req.EndDate)
+		endTime = endTime.Add(24 * time.Hour) // Include end date
+
+		for _, imp := range imports {
+			if imp.CreatedAt.After(endTime) {
+				continue // Skip imports after end date
+			}
+			allImports = append(allImports, imp)
+		}
+
+		// Stop if we've passed the end date
+		if len(imports) > 0 && imports[len(imports)-1].CreatedAt.After(endTime) {
+			break
+		}
+	}
+
+	log.Printf("[admin-import] Found %d imports in date range", len(allImports))
+
+	// Import each file
+	for _, imp := range allImports {
+		// Check if already imported
+		exists, err := db.CheckImportExists(ctx, safecastfetcher.SourceTypeSafecastAPI, imp.ID)
+		if err != nil {
+			log.Printf("[admin-import] Error checking import #%d: %v", imp.ID, err)
+			errors++
+			continue
+		}
+
+		if exists {
+			skipped++
+			continue
+		}
+
+		// Download and import
+		content, filename, err := safecastfetcher.DownloadLogFile(ctx, imp.SourceURL)
+		if err != nil {
+			log.Printf("[admin-import] import #%d: download failed: %v", imp.ID, err)
+			errors++
+			continue
+		}
+
+		// Import using the importer function from the fetcher
+		trackID := GenerateSerialNumber()
+		bytesFile := safecastfetcher.NewBytesFile(content, filename)
+
+		_, finalTrackID, err := processBGeigieZenFile(bytesFile, trackID, db, *dbType)
+		if err != nil {
+			log.Printf("[admin-import] import #%d: process failed: %v", imp.ID, err)
+			errors++
+			continue
+		}
+
+		// Record the upload
+		upload := database.Upload{
+			Filename:  filename,
+			FileType:  ".log",
+			TrackID:   finalTrackID,
+			FileSize:  int64(len(content)),
+			UploadIP:  "admin-import",
+			CreatedAt: time.Now().Unix(),
+			Source:    safecastfetcher.SourceTypeSafecastAPI,
+			SourceID:  fmt.Sprintf("%d", imp.ID),
+			SourceURL: imp.SourceURL,
+			UserID:    fmt.Sprintf("%d", imp.UserID),
+		}
+
+		if _, err := db.InsertUpload(ctx, upload); err != nil {
+			log.Printf("[admin-import] import #%d: record upload failed: %v", imp.ID, err)
+			errors++
+			continue
+		}
+
+		imported++
+		log.Printf("[admin-import] import #%d: success (track %s)", imp.ID, finalTrackID)
+	}
+
+	log.Printf("[admin-import] Complete: imported=%d skipped=%d errors=%d", imported, skipped, errors)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "success",
+		"imported": imported,
+		"skipped":  skipped,
+		"errors":   errors,
+		"total":    len(allImports),
+	})
 }
 
 // adminTracksHandler lists all tracks in the system with statistics.
@@ -5364,9 +5633,12 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
 		h1 { color: var(--text-primary); }
-		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
-		.nav a { margin-right: 15px; color: var(--link-color); text-decoration: none; }
+		.nav { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); display: flex; align-items: center; justify-content: space-between; }
+		.nav-left { display: flex; align-items: center; gap: 15px; }
+		.nav a { color: var(--link-color); text-decoration: none; }
 		.nav a:hover { text-decoration: underline; }
+		.back-to-map-btn { background: #2196F3 !important; color: white !important; padding: 8px 16px; border-radius: 4px; text-decoration: none !important; font-weight: 500; transition: background 0.2s; }
+		.back-to-map-btn:hover { background: #1976D2 !important; text-decoration: none !important; }
 		.summary { background: var(--bg-card); padding: 15px; margin-bottom: 20px; border-radius: 5px; box-shadow: var(--shadow); }
 		table { border-collapse: collapse; width: 100%; background: var(--bg-card); box-shadow: var(--shadow); }
 		th { background: var(--th-bg); color: white; padding: 12px; text-align: left; font-weight: 600; }
@@ -5397,10 +5669,13 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 <body>
 	<h1>🗂️ All Tracks Administration</h1>
 	<div class="nav">
-		<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
-		<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
-		<button class="backfill-btn" onclick="backfillUploads()">📥 Backfill Upload Records</button>
-		<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		<div class="nav-left">
+			<a href="/api/admin/tracks?password=` + password + `">All Tracks</a>
+			<a href="/api/admin/uploads?password=` + password + `">Tracked Uploads</a>
+			<button class="backfill-btn" onclick="backfillUploads()">📥 Backfill Upload Records</button>
+			<button class="delete-selected-btn" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>🗑️ Delete Selected</button>
+		</div>
+		<a href="/" class="back-to-map-btn">🗺️ Back to Map</a>
 	</div>
 	<div class="summary">
 		<strong>Total Tracks:</strong> ` + strconv.Itoa(len(tracks)) + ` (showing up to ` + strconv.Itoa(limit) + `)
@@ -6797,6 +7072,8 @@ func main() {
 			fileContent []byte,
 			filename string,
 			safecastImportID int64,
+			sourceURL string,
+			userID string,
 			db *database.Database,
 			dbType string,
 		) (trackID string, markerCount int, err error) {
@@ -6812,10 +7089,17 @@ func main() {
 				return "", 0, fmt.Errorf("process bGeigie file: %w", err)
 			}
 
-			// Count markers for this track
-			// We don't have a direct way to get the count from processBGeigieZenFile,
-			// so we'll estimate from the file or return 0
-			markerCount = 0
+			// Count markers for this track by querying the database
+			countQuery := "SELECT COUNT(*) FROM markers WHERE trackID = ?"
+			if dbType == "postgres" || dbType == "duckdb" {
+				countQuery = "SELECT COUNT(*) FROM markers WHERE trackID = $1"
+			}
+			err = db.DB.QueryRowContext(ctx, countQuery, finalTrackID).Scan(&markerCount)
+			if err != nil {
+				// If count fails, log but don't fail the import
+				log.Printf("[safecast-fetcher] warning: failed to count markers for track %s: %v", finalTrackID, err)
+				markerCount = 0
+			}
 
 			// Record the upload with source tracking
 			upload := database.Upload{
@@ -6827,6 +7111,8 @@ func main() {
 				CreatedAt: time.Now().Unix(),
 				Source:    safecastfetcher.SourceTypeSafecastAPI,
 				SourceID:  fmt.Sprintf("%d", safecastImportID),
+				SourceURL: sourceURL,
+				UserID:    userID,
 			}
 
 			if _, err := db.InsertUpload(ctx, upload); err != nil {
@@ -6914,6 +7200,7 @@ func main() {
 	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)         // POST /api/admin/backfill?password=<pwd>
 	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)        // POST /api/admin/delete
 	http.HandleFunc("/api/admin/delete-multiple", adminDeleteMultipleTracksHandler) // POST /api/admin/delete-multiple
+	http.HandleFunc("/api/admin/import-from-safecast", adminImportFromSafecastHandler) // POST /api/admin/import-from-safecast
 
 	// API endpoints ship JSON/archives. Keeping registration close to other
 	// routes avoids surprises for operators scanning main() for handlers.

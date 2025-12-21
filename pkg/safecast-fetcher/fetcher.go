@@ -142,7 +142,7 @@ func (f *Fetcher) poll(ctx context.Context) error {
 		}
 
 		// Import the file
-		result, err := ImportSafecastFile(ctx, content, filename, imp.ID, f.db, f.dbType, f.importer)
+		result, err := ImportSafecastFile(ctx, content, filename, imp.ID, imp.SourceURL, fmt.Sprintf("%d", imp.UserID), f.db, f.dbType, f.importer)
 		if err != nil {
 			f.logf("[safecast-fetcher] import #%d: import failed: %v", imp.ID, err)
 			errors++
@@ -175,7 +175,14 @@ func (f *Fetcher) fetchNewImports(ctx context.Context, lastID int64) ([]Safecast
 
 		// No more results
 		if len(imports) == 0 {
+			f.logf("[safecast-fetcher] page %d: no results, stopping", page)
 			break
+		}
+
+		// Log what we got
+		if len(imports) > 0 {
+			f.logf("[safecast-fetcher] page %d: fetched %d imports (IDs %d-%d)",
+				page, len(imports), imports[0].ID, imports[len(imports)-1].ID)
 		}
 
 		// Filter out already-processed imports
@@ -187,19 +194,11 @@ func (f *Fetcher) fetchNewImports(ctx context.Context, lastID int64) ([]Safecast
 			}
 		}
 
-		// If we got no new imports on this page, we can stop
-		if newImports == 0 {
-			break
-		}
+		f.logf("[safecast-fetcher] page %d: found %d new imports (> %d)", page, newImports, lastID)
 
 		// Check if we've hit our batch size limit
 		if f.batchSize > 0 && len(allImports) >= f.batchSize {
 			allImports = allImports[:f.batchSize]
-			break
-		}
-
-		// If we got fewer results than expected, this is probably the last page
-		if len(imports) < perPageEstimate {
 			break
 		}
 
