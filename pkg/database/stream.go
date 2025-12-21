@@ -18,6 +18,8 @@ func (db *Database) StreamMarkersByZoomAndBounds(ctx context.Context, zoom int, 
 		var query string
 		switch dbType {
 		case "pgx":
+			// Use PostGIS spatial index with ST_Intersects and && bounding box operator
+			// for optimal performance. The && operator uses the GIST index efficiently.
 			query = `
                 SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
                        COALESCE(altitude, 0) as altitude,
@@ -27,7 +29,9 @@ func (db *Database) StreamMarkersByZoomAndBounds(ctx context.Context, zoom int, 
                        COALESCE(humidity, 0) as humidity,
                        COALESCE(has_spectrum, FALSE) as has_spectrum
                 FROM markers
-                WHERE zoom = $1 AND lat BETWEEN $2 AND $3 AND lon BETWEEN $4 AND $5;
+                WHERE zoom = $1 
+                  AND geom && ST_MakeEnvelope($4, $2, $5, $3, 4326)
+                  AND ST_Intersects(geom, ST_MakeEnvelope($4, $2, $5, $3, 4326));
             `
 		default:
 			query = `
@@ -86,6 +90,8 @@ func (db *Database) StreamMarkersByTrackIDZoomAndBounds(ctx context.Context, tra
 		var query string
 		switch dbType {
 		case "pgx":
+			// Use PostGIS spatial index with ST_Intersects and && bounding box operator
+			// for optimal performance. The && operator uses the GIST index efficiently.
 			query = `
                 SELECT id, doseRate, date, lon, lat, countRate, zoom, speed, trackID,
                        COALESCE(altitude, 0) as altitude,
@@ -95,7 +101,10 @@ func (db *Database) StreamMarkersByTrackIDZoomAndBounds(ctx context.Context, tra
                        COALESCE(humidity, 0) as humidity,
                        COALESCE(has_spectrum, FALSE) as has_spectrum
                 FROM markers
-                WHERE trackID = $1 AND zoom = $2 AND lat BETWEEN $3 AND $4 AND lon BETWEEN $5 AND $6;
+                WHERE trackID = $1 
+                  AND zoom = $2
+                  AND geom && ST_MakeEnvelope($5, $3, $6, $4, 4326)
+                  AND ST_Intersects(geom, ST_MakeEnvelope($5, $3, $6, $4, 4326));
             `
 		default:
 			query = `

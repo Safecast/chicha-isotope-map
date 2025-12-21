@@ -599,6 +599,19 @@ func NewDatabase(config Config) (*Database, error) {
 			log.Printf("duckdb tuning skipped: %v", err)
 		}
 		cancel()
+	case "pgx":
+		// PostgreSQL benefits from multiple concurrent connections. Set pool size to
+		// 2×CPU cores (or minimum 8) to maximize throughput while avoiding connection
+		// exhaustion. This enables better multithreading and parallel query execution.
+		maxConns := runtime.NumCPU() * 2
+		if maxConns < 8 {
+			maxConns = 8 // Minimum 8 connections for better concurrency
+		}
+		db.SetMaxOpenConns(maxConns)
+		db.SetMaxIdleConns(maxConns)
+		db.SetConnMaxLifetime(5 * time.Minute)
+		db.SetConnMaxIdleTime(2 * time.Minute)
+		log.Printf("PostgreSQL connection pool configured: MaxOpenConns=%d (2×%d CPU cores)", maxConns, runtime.NumCPU())
 	case "clickhouse":
 		// ClickHouse benefits from a few parallel connections while remaining lightweight.
 		db.SetMaxOpenConns(8)
@@ -1450,8 +1463,32 @@ CREATE TABLE IF NOT EXISTS markers (
   tube        TEXT,
   country     TEXT,
   has_spectrum BOOLEAN DEFAULT FALSE,
+  geom        GEOMETRY(POINT, 4326),
   CONSTRAINT markers_unique UNIQUE (doseRate,date,lon,lat,countRate,zoom,speed,trackID)
 );
+
+-- Create PostGIS spatial index for optimal spatial query performance
+CREATE INDEX IF NOT EXISTS idx_markers_geom_gist ON markers USING GIST(geom);
+
+-- Create function to automatically update geom column when lat/lon changes
+CREATE OR REPLACE FUNCTION update_marker_geom()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.lat IS NOT NULL AND NEW.lon IS NOT NULL THEN
+    NEW.geom := ST_SetSRID(ST_MakePoint(NEW.lon, NEW.lat), 4326);
+  ELSE
+    NEW.geom := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger to automatically populate geom column
+DROP TRIGGER IF EXISTS trigger_update_marker_geom ON markers;
+CREATE TRIGGER trigger_update_marker_geom
+  BEFORE INSERT OR UPDATE OF lat, lon ON markers
+  FOR EACH ROW
+  EXECUTE FUNCTION update_marker_geom();
 
 CREATE TABLE IF NOT EXISTS tracks (
   trackID     TEXT PRIMARY KEY
@@ -3426,10 +3463,17 @@ func (db *Database) GetMarkersByZoomAndBounds(ctx context.Context, zoom int, min
 	// pipeline. This mirrors the Go proverb "Don't communicate by sharing
 	// memory; share memory by communicating" by letting the channel scheduler
 	// juggle imports and web reads without mutexes.
-	where := fmt.Sprintf("zoom = %s AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
-		placeholder(dbType, 1), placeholder(dbType, 2), placeholder(dbType, 3), placeholder(dbType, 4), placeholder(dbType, 5))
+	spatialWhere, _ := buildSpatialWhereClause(dbType, 2)
+	where := fmt.Sprintf("zoom = %s AND %s", placeholder(dbType, 1), spatialWhere)
 
-	args := []interface{}{zoom, minLat, maxLat, minLon, maxLon}
+	var args []interface{}
+	if strings.ToLower(dbType) == "pgx" {
+		// PostGIS: zoom, minLon, minLat, maxLon, maxLat
+		args = []interface{}{zoom, minLon, minLat, maxLon, maxLat}
+	} else {
+		// Standard: zoom, minLat, maxLat, minLon, maxLon
+		args = []interface{}{zoom, minLat, maxLat, minLon, maxLon}
+	}
 	return db.queryMarkers(ctx, where, args, dbType, WorkloadWebRead)
 }
 
@@ -3443,10 +3487,17 @@ func (db *Database) GetMarkersByTrackID(ctx context.Context, trackID string, dbT
 
 // GetMarkersByTrackIDAndBounds retrieves markers filtered by trackID and geographical bounds.
 func (db *Database) GetMarkersByTrackIDAndBounds(ctx context.Context, trackID string, minLat, minLon, maxLat, maxLon float64, dbType string) ([]Marker, error) {
-	where := fmt.Sprintf("trackID = %s AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
-		placeholder(dbType, 1), placeholder(dbType, 2), placeholder(dbType, 3), placeholder(dbType, 4), placeholder(dbType, 5))
+	spatialWhere, _ := buildSpatialWhereClause(dbType, 2)
+	where := fmt.Sprintf("trackID = %s AND %s", placeholder(dbType, 1), spatialWhere)
 
-	args := []interface{}{trackID, minLat, maxLat, minLon, maxLon}
+	var args []interface{}
+	if strings.ToLower(dbType) == "pgx" {
+		// PostGIS: trackID, minLon, minLat, maxLon, maxLat
+		args = []interface{}{trackID, minLon, minLat, maxLon, maxLat}
+	} else {
+		// Standard: trackID, minLat, maxLat, minLon, maxLon
+		args = []interface{}{trackID, minLat, maxLat, minLon, maxLon}
+	}
 	return db.queryMarkers(ctx, where, args, dbType, WorkloadWebRead)
 }
 
@@ -3458,11 +3509,18 @@ func (db *Database) GetMarkersByTrackIDZoomAndBounds(
 	minLat, minLon, maxLat, maxLon float64,
 	dbType string,
 ) ([]Marker, error) {
+	spatialWhere, _ := buildSpatialWhereClause(dbType, 3)
+	where := fmt.Sprintf("trackID = %s AND zoom = %s AND %s",
+		placeholder(dbType, 1), placeholder(dbType, 2), spatialWhere)
 
-	where := fmt.Sprintf("trackID = %s AND zoom = %s AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
-		placeholder(dbType, 1), placeholder(dbType, 2), placeholder(dbType, 3), placeholder(dbType, 4), placeholder(dbType, 5), placeholder(dbType, 6))
-
-	args := []interface{}{trackID, zoom, minLat, maxLat, minLon, maxLon}
+	var args []interface{}
+	if strings.ToLower(dbType) == "pgx" {
+		// PostGIS: trackID, zoom, minLon, minLat, maxLon, maxLat
+		args = []interface{}{trackID, zoom, minLon, minLat, maxLon, maxLat}
+	} else {
+		// Standard: trackID, zoom, minLat, maxLat, minLon, maxLon
+		args = []interface{}{trackID, zoom, minLat, maxLat, minLon, maxLon}
+	}
 	return db.queryMarkers(ctx, where, args, dbType, WorkloadWebRead)
 }
 
@@ -3491,11 +3549,16 @@ func (db *Database) GetMarkersByZoomBoundsSpeed(
 	sb.WriteString("zoom = " + placeholder(dbType, len(args)+1))
 	args = append(args, zoom)
 
-	sb.WriteString(" AND lat BETWEEN " + placeholder(dbType, len(args)+1) + " AND " + placeholder(dbType, len(args)+2))
-	args = append(args, minLat, maxLat)
-
-	sb.WriteString(" AND lon BETWEEN " + placeholder(dbType, len(args)+1) + " AND " + placeholder(dbType, len(args)+2))
-	args = append(args, minLon, maxLon)
+	// Use spatial helper for optimal PostGIS index usage
+	spatialWhere, _ := buildSpatialWhereClause(dbType, len(args)+1)
+	sb.WriteString(" AND " + spatialWhere)
+	if strings.ToLower(dbType) == "pgx" {
+		// PostGIS: minLon, minLat, maxLon, maxLat
+		args = append(args, minLon, minLat, maxLon, maxLat)
+	} else {
+		// Standard: minLat, maxLat, minLon, maxLon
+		args = append(args, minLat, maxLat, minLon, maxLon)
+	}
 
 	// ---- фильтр по времени (опционально) ------------------------
 	if dateFrom > 0 {
@@ -3573,11 +3636,16 @@ func (db *Database) GetMarkersByTrackIDZoomBoundsSpeed(
 	sb.WriteString(" AND zoom = " + placeholder(dbType, len(args)+1))
 	args = append(args, zoom)
 
-	sb.WriteString(" AND lat BETWEEN " + placeholder(dbType, len(args)+1) + " AND " + placeholder(dbType, len(args)+2))
-	args = append(args, minLat, maxLat)
-
-	sb.WriteString(" AND lon BETWEEN " + placeholder(dbType, len(args)+1) + " AND " + placeholder(dbType, len(args)+2))
-	args = append(args, minLon, maxLon)
+	// Use spatial helper for optimal PostGIS index usage
+	spatialWhere, _ := buildSpatialWhereClause(dbType, len(args)+1)
+	sb.WriteString(" AND " + spatialWhere)
+	if strings.ToLower(dbType) == "pgx" {
+		// PostGIS: minLon, minLat, maxLon, maxLat
+		args = append(args, minLon, minLat, maxLon, maxLat)
+	} else {
+		// Standard: minLat, maxLat, minLon, maxLon
+		args = append(args, minLat, maxLat, minLon, maxLon)
+	}
 
 	if dateFrom > 0 {
 		sb.WriteString(" AND date >= " + placeholder(dbType, len(args)+1))
@@ -3612,13 +3680,20 @@ func (db *Database) GetMarkersByTrackIDZoomBoundsSpeed(
 // that live writes and heavy imports cannot starve web readers. A shared scanner keeps
 // the call sites compact while still returning fully populated Marker structs.
 func (db *Database) queryMarkers(ctx context.Context, where string, args []interface{}, dbType string, lane WorkloadKind) ([]Marker, error) {
+	var hasSpectrumExpr string
+	if strings.ToLower(dbType) == "pgx" || strings.ToLower(dbType) == "duckdb" {
+		hasSpectrumExpr = "COALESCE(has_spectrum, FALSE) AS has_spectrum"
+	} else {
+		hasSpectrumExpr = "COALESCE(has_spectrum, 0) AS has_spectrum"
+	}
 	query := fmt.Sprintf(`SELECT id,doseRate,date,lon,lat,countRate,zoom,speed,trackID,
                                      COALESCE(altitude, 0) AS altitude,
                                      COALESCE(detector, '') AS detector,
                                      COALESCE(radiation, '') AS radiation,
                                      COALESCE(temperature, 0) AS temperature,
-                                     COALESCE(humidity, 0) AS humidity
-                              FROM markers WHERE %s;`, where)
+                                     COALESCE(humidity, 0) AS humidity,
+                                     %s
+                              FROM markers WHERE %s;`, hasSpectrumExpr, where)
 
 	var out []Marker
 
@@ -3640,10 +3715,25 @@ func (db *Database) queryMarkers(ctx context.Context, where string, args []inter
 
 		for rows.Next() {
 			var m Marker
+			var hasSpectrum interface{}
 			if err := rows.Scan(&m.ID, &m.DoseRate, &m.Date, &m.Lon, &m.Lat,
 				&m.CountRate, &m.Zoom, &m.Speed, &m.TrackID,
-				&m.Altitude, &m.Detector, &m.Radiation, &m.Temperature, &m.Humidity); err != nil {
+				&m.Altitude, &m.Detector, &m.Radiation, &m.Temperature, &m.Humidity, &hasSpectrum); err != nil {
 				return fmt.Errorf("scan markers: %w", err)
+			}
+			// Convert has_spectrum to boolean
+			if strings.ToLower(dbType) == "pgx" || strings.ToLower(dbType) == "duckdb" {
+				if b, ok := hasSpectrum.(bool); ok {
+					m.HasSpectrum = b
+				} else if b, ok := hasSpectrum.([]uint8); ok && len(b) > 0 {
+					m.HasSpectrum = string(b) == "t" || string(b) == "1"
+				}
+			} else {
+				if i, ok := hasSpectrum.(int64); ok {
+					m.HasSpectrum = i != 0
+				} else if i, ok := hasSpectrum.(int); ok {
+					m.HasSpectrum = i != 0
+				}
 			}
 			out = append(out, m)
 		}
@@ -3666,6 +3756,34 @@ func placeholder(dbType string, n int) string {
 		return fmt.Sprintf("$%d", n)
 	}
 	return "?"
+}
+
+// buildSpatialWhereClause builds a WHERE clause for spatial bounds filtering.
+// For PostgreSQL (pgx), it uses PostGIS ST_Intersects with && bounding box operator
+// for optimal GIST index usage. For other databases, it uses lat/lon BETWEEN clauses.
+// Returns the WHERE clause fragment and the number of placeholders used.
+func buildSpatialWhereClause(dbType string, startPlaceholder int) (string, int) {
+	if strings.ToLower(dbType) == "pgx" {
+		// Use PostGIS spatial index: && for bounding box check, ST_Intersects for exact check
+		// Parameters: minLon, minLat, maxLon, maxLat (ST_MakeEnvelope order)
+		return fmt.Sprintf("geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326) AND ST_Intersects(geom, ST_MakeEnvelope(%s, %s, %s, %s, 4326))",
+			placeholder(dbType, startPlaceholder),   // minLon
+			placeholder(dbType, startPlaceholder+1), // minLat
+			placeholder(dbType, startPlaceholder+2), // maxLon
+			placeholder(dbType, startPlaceholder+3), // maxLat
+			placeholder(dbType, startPlaceholder),   // minLon (for ST_Intersects)
+			placeholder(dbType, startPlaceholder+1), // minLat (for ST_Intersects)
+			placeholder(dbType, startPlaceholder+2), // maxLon (for ST_Intersects)
+			placeholder(dbType, startPlaceholder+3)), // maxLat (for ST_Intersects)
+			4 // 4 parameters: minLon, minLat, maxLon, maxLat
+	}
+	// For non-PostgreSQL databases, use standard lat/lon BETWEEN
+	return fmt.Sprintf("lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+		placeholder(dbType, startPlaceholder),   // minLat
+		placeholder(dbType, startPlaceholder+1), // maxLat
+		placeholder(dbType, startPlaceholder+2), // minLon
+		placeholder(dbType, startPlaceholder+3)), // maxLon
+		4 // 4 parameters: minLat, maxLat, minLon, maxLon
 }
 
 // DetectExistingTrackID scans the first incoming markers and tries to

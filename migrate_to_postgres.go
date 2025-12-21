@@ -108,6 +108,9 @@ func main() {
 
 func createPostgreSQLSchema(db *sql.DB) error {
 	schema := `
+-- Enable PostGIS extension for spatial operations
+CREATE EXTENSION IF NOT EXISTS postgis;
+
 -- Create tracks table
 CREATE TABLE IF NOT EXISTS tracks (
   trackID TEXT PRIMARY KEY,
@@ -130,7 +133,9 @@ CREATE TABLE IF NOT EXISTS markers (
   countRate DOUBLE PRECISION,
   trackID TEXT,
   zoomLevel INTEGER DEFAULT 10,
-  has_spectrum BOOLEAN DEFAULT FALSE
+  has_spectrum BOOLEAN DEFAULT FALSE,
+  -- Add PostGIS geometry column for spatial indexing
+  geom GEOMETRY(POINT, 4326)
 );
 
 -- Create spectra table
@@ -163,7 +168,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   user_id TEXT
 );
 
--- Create indexes
+-- Create standard B-tree indexes
 CREATE INDEX IF NOT EXISTS idx_markers_trackid ON markers(trackID);
 CREATE INDEX IF NOT EXISTS idx_markers_lat ON markers(lat);
 CREATE INDEX IF NOT EXISTS idx_markers_lon ON markers(lon);
@@ -180,6 +185,33 @@ CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
 CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_source_id ON uploads(source, source_id);
+
+-- Create PostGIS spatial index using GIST for optimal spatial query performance
+-- This index enables fast spatial queries using ST_Intersects with && bounding box operator
+CREATE INDEX IF NOT EXISTS idx_markers_geom_gist ON markers USING GIST(geom);
+
+-- Create function to automatically update geom column when lat/lon changes
+CREATE OR REPLACE FUNCTION update_marker_geom()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.lat IS NOT NULL AND NEW.lon IS NOT NULL THEN
+    NEW.geom := ST_SetSRID(ST_MakePoint(NEW.lon, NEW.lat), 4326);
+  ELSE
+    NEW.geom := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger to automatically populate geom column
+DROP TRIGGER IF EXISTS trigger_update_marker_geom ON markers;
+CREATE TRIGGER trigger_update_marker_geom
+  BEFORE INSERT OR UPDATE OF lat, lon ON markers
+  FOR EACH ROW
+  EXECUTE FUNCTION update_marker_geom();
+
+-- Update existing rows to populate geom column
+UPDATE markers SET geom = ST_SetSRID(ST_MakePoint(lon, lat), 4326) WHERE lat IS NOT NULL AND lon IS NOT NULL AND geom IS NULL;
 `
 
 	_, err := db.Exec(schema)

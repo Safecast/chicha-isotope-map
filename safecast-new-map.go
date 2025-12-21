@@ -72,7 +72,7 @@ var content embed.FS
 var doseData database.Data
 
 var domain = flag.String("domain", "", "Serve HTTPS on 80/443 via Let's Encrypt when a domain is provided.")
-var dbType = flag.String("db-type", "sqlite", "Database driver: chai, sqlite, duckdb, pgx (PostgreSQL), or clickhouse")
+var dbType = flag.String("db-type", "pgx", "Database driver: pgx (PostgreSQL, default), sqlite, chai, duckdb, or clickhouse")
 var dbPath = flag.String("db-path", "", "Filesystem path for chai/sqlite/duckdb databases; defaults to the working directory.")
 var dbConn = flag.String("db-conn", "", "Connection URI for network databases.\n  PostgreSQL: postgres://user:pass@host:5432/<database>?sslmode=verify-full\n  ClickHouse: clickhouse://user:pass@host:9000/<database>?secure=true")
 var port = flag.Int("port", 8765, "Port for running the HTTP server when not using -domain.")
@@ -429,6 +429,24 @@ func resolveArchivePath(flagValue, defaultFile string, logf func(string, ...any)
 
 	// As a last resort return a relative filename so the generator can still run.
 	return fallback
+}
+
+// getEnvOrDefault returns the environment variable value or a default if not set.
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvIntOrDefault returns the environment variable value as int or a default if not set.
+func getEnvIntOrDefault(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
 }
 
 // applyDBConnection parses a DSN passed via -db-conn and copies relevant fields into the
@@ -6995,11 +7013,16 @@ func main() {
 	}
 	switch driverName {
 	case "pgx":
-		dbCfg.DBHost = "127.0.0.1"
-		dbCfg.DBPort = 5432
-		dbCfg.DBUser = "postgres"
-		dbCfg.DBName = "IsotopePathways"
-		dbCfg.PGSSLMode = "prefer"
+		// Default PostgreSQL connection settings
+		// Can be overridden via -db-conn flag or environment variables:
+		// DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME, DB_SSLMODE
+		dbCfg.DBHost = getEnvOrDefault("DB_HOST", "127.0.0.1")
+		dbCfg.DBPort = getEnvIntOrDefault("DB_PORT", 5432)
+		dbCfg.DBUser = getEnvOrDefault("DB_USER", "postgres")
+		dbCfg.DBPass = getEnvOrDefault("DB_PASS", "")
+		dbCfg.DBName = getEnvOrDefault("DB_NAME", "safecast")
+		dbCfg.PGSSLMode = getEnvOrDefault("DB_SSLMODE", "prefer")
+		// If -db-conn is provided, it overrides individual settings
 		if err := applyDBConnection(driverName, *dbConn, &dbCfg); err != nil {
 			log.Fatalf("DB config: %v", err)
 		}
