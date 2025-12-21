@@ -110,7 +110,7 @@ The implementation extends the existing `uploads` table with two new columns:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `-safecast-fetcher-enabled` | bool | `false` | Enable the auto-importer service |
+| `-safecast-fetcher` | bool | `false` | Enable the auto-importer service |
 | `-safecast-fetcher-interval` | duration | `5m` | How often to poll for new files (e.g., `1m`, `10m`, `1h`) |
 | `-safecast-fetcher-batch-size` | int | `10` | Maximum files to import per polling cycle (0 = unlimited) |
 | `-safecast-fetcher-start-date` | string | `""` | Only import files uploaded after this date (YYYY-MM-DD format) |
@@ -121,7 +121,7 @@ The implementation extends the existing `uploads` table with two new columns:
 Start with a small batch size and longer interval to test the system:
 ```bash
 ./safecast-new-map \
-  -safecast-fetcher-enabled \
+  -safecast-fetcher \
   -safecast-fetcher-interval=10m \
   -safecast-fetcher-batch-size=5 \
   -safecast-fetcher-start-date=2025-12-20
@@ -131,7 +131,7 @@ Start with a small batch size and longer interval to test the system:
 Once tested, use typical production settings:
 ```bash
 ./safecast-new-map \
-  -safecast-fetcher-enabled \
+  -safecast-fetcher \
   -safecast-fetcher-interval=5m \
   -safecast-fetcher-batch-size=20 \
   -safecast-fetcher-start-date=2025-01-01
@@ -141,7 +141,7 @@ Once tested, use typical production settings:
 Import historical data faster (use temporarily):
 ```bash
 ./safecast-new-map \
-  -safecast-fetcher-enabled \
+  -safecast-fetcher \
   -safecast-fetcher-interval=1m \
   -safecast-fetcher-batch-size=50
 ```
@@ -150,7 +150,7 @@ Import historical data faster (use temporarily):
 Remove date filter to import everything:
 ```bash
 ./safecast-new-map \
-  -safecast-fetcher-enabled \
+  -safecast-fetcher \
   -safecast-fetcher-batch-size=50
 ```
 
@@ -283,14 +283,14 @@ pkg/safecast-fetcher/
 **A:** Not in the initial implementation. The API supports these filters, but they're not exposed as CLI flags. This could be added later.
 
 ### Q: What if I want to stop importing?
-**A:** Simply restart without the `-safecast-fetcher-enabled` flag. The uploads table retains the tracking information for if/when you re-enable it.
+**A:** Simply restart without the `-safecast-fetcher` flag. The uploads table retains the tracking information for if/when you re-enable it.
 
 ## Troubleshooting
 
 ### No files are being imported
 
 **Check:**
-1. Is `-safecast-fetcher-enabled` set?
+1. Is `-safecast-fetcher` set?
 2. Does the start date filter exclude all files?
 3. Are there new approved files on api.safecast.org since your last poll?
 4. Check logs for API errors

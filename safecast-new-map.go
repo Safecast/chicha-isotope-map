@@ -4811,8 +4811,9 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th class="sortable" onclick="sortTable(3)" data-type="text">Type</th>
 				<th class="sortable" onclick="sortTable(4)" data-type="text">Track ID</th>
 				<th class="sortable" onclick="sortTable(5)" data-type="text">Size</th>
-				<th class="sortable" onclick="sortTable(6)" data-type="text">Upload IP</th>
-				<th class="sortable" onclick="sortTable(7)" data-type="date">Upload Time</th>
+				<th class="sortable" onclick="sortTable(6)" data-type="text">Source</th>
+				<th class="sortable" onclick="sortTable(7)" data-type="text">Upload IP</th>
+				<th class="sortable" onclick="sortTable(8)" data-type="date">Upload Time</th>
 				<th>Actions</th>
 			</tr>
 			<tr class="filter-row">
@@ -4822,6 +4823,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th><input type="text" class="filter-input" placeholder="Type..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Filter Track ID..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Size..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="Source..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="IP..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
 				<th></th>
@@ -4833,6 +4835,16 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 			uploadTime := time.Unix(upload.CreatedAt, 0).Format("2006-01-02 15:04:05")
 			fileSize := formatFileSize(upload.FileSize)
 
+			// Format source display
+			sourceDisplay := "manual"
+			if upload.Source != "" {
+				if upload.SourceID != "" {
+					sourceDisplay = fmt.Sprintf("%s (#%s)", upload.Source, upload.SourceID)
+				} else {
+					sourceDisplay = upload.Source
+				}
+			}
+
 			html += fmt.Sprintf(`
 			<tr>
 				<td class="checkbox-col"><input type="checkbox" class="track-checkbox" value="%s" onchange="updateDeleteButton()"></td>
@@ -4841,6 +4853,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<td>%s</td>
 				<td class="trackid"><a href="/trackid/%s">%s</a></td>
 				<td class="filesize">%s</td>
+				<td class="source">%s</td>
 				<td>%s</td>
 				<td class="datetime">%s</td>
 				<td><button class="delete-btn" onclick="deleteTrack('%s')">Delete</button></td>
@@ -4851,6 +4864,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				upload.FileType,
 				upload.TrackID, upload.TrackID,
 				fileSize,
+				sourceDisplay,
 				upload.UploadIP,
 				uploadTime,
 				upload.TrackID,
