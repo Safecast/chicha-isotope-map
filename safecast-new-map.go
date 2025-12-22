@@ -881,8 +881,13 @@ func processBGeigieZenFile(
 	skipped := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
-		// Accept all bGeigie format variants: $BNRDD, $BMRDD, $BNXRDD, $CZRDD, etc.
-		if line == "" || !strings.HasPrefix(line, "$") || !strings.Contains(line, "RDD") {
+		// Accept all bGeigie format variants: $BNRDD, $BMRDD, $BNXRDD, $CZRDD, $CZRA1, etc.
+		if line == "" || !strings.HasPrefix(line, "$") {
+			skipped++
+			continue
+		}
+		// Accept lines with RDD (bGeigie standard) or CZR (CzechRad)
+		if !strings.Contains(line, "RDD") && !strings.Contains(line, "CZR") {
 			skipped++
 			continue
 		}
@@ -4908,10 +4913,12 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				recordingDate = time.Unix(upload.RecordingDate, 0).Format("2006-01-02 15:04:05")
 			}
 
-			// Format source display
+			// Format source display and get numeric source ID for sorting
 			sourceDisplay := "manual"
+			sourceIDNumeric := "0" // Default for manual uploads
 			if upload.Source != "" {
 				if upload.SourceID != "" {
+					sourceIDNumeric = upload.SourceID // Store for data attribute
 					if upload.SourceURL != "" {
 						sourceDisplay = fmt.Sprintf(`%s (<a href="%s" target="_blank">#%s</a>)`,
 							upload.Source, upload.SourceURL, upload.SourceID)
@@ -4939,7 +4946,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<td class="trackid"><a href="/trackid/%s">%s</a></td>
 				<td class="datetime">%s</td>
 				<td class="filesize">%s</td>
-				<td class="source">%s</td>
+				<td class="source" data-source-id="%s">%s</td>
 				<td>%s</td>
 				<td>%s</td>
 				<td class="datetime">%s</td>
@@ -4952,7 +4959,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				upload.TrackID, upload.TrackID,
 				recordingDate,
 				fileSize,
-				sourceDisplay,
+				sourceIDNumeric, sourceDisplay,
 				userIDDisplay,
 				upload.UploadIP,
 				uploadTime,
@@ -5070,6 +5077,15 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				let aVal = a.cells[columnIndex].textContent.trim();
 				let bVal = b.cells[columnIndex].textContent.trim();
 
+				// Special handling for Source column - sort by numeric import ID
+				if (columnIndex === 7) {
+					const aSourceID = a.cells[columnIndex].getAttribute('data-source-id');
+					const bSourceID = b.cells[columnIndex].getAttribute('data-source-id');
+					aVal = parseInt(aSourceID) || 0;
+					bVal = parseInt(bSourceID) || 0;
+					return sortDirection[columnIndex] === 'asc' ? aVal - bVal : bVal - aVal;
+				}
+
 				// Numeric comparison
 				if (dataType === 'number') {
 					aVal = parseInt(aVal) || 0;
@@ -5111,7 +5127,12 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 						const cellIndex = index + 1; // +1 because first column is checkbox
 						const cell = row.cells[cellIndex];
 						if (cell) {
-							const cellText = cell.textContent.toLowerCase();
+							let cellText = cell.textContent.toLowerCase();
+							// For Source column, also check data-source-id attribute
+							if (cellIndex === 7) {
+								const sourceID = cell.getAttribute('data-source-id') || '';
+								cellText = cellText + ' ' + sourceID;
+							}
 							if (!cellText.includes(filterValue)) {
 								show = false;
 							}
@@ -5154,25 +5175,74 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 			const password = new URLSearchParams(window.location.search).get('password');
 
 			try {
+				// Start the import with streaming response
 				const response = await fetch('/api/admin/import-from-safecast?password=' + password, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ start_date: startDate, end_date: endDate })
 				});
 
-				const data = await response.json();
+				if (!response.ok) {
+					throw new Error('Server returned error: ' + response.status);
+				}
 
-				if (data.status === 'success') {
-					status.className = 'import-status success';
-					status.textContent = 'Import complete! ' + data.imported + ' files imported, ' +
-					                     data.skipped + ' skipped, ' + data.errors + ' errors';
-					setTimeout(() => window.location.reload(), 2000);
-				} else {
-					status.className = 'import-status error';
-					status.textContent = 'Error: ' + (data.error || 'Unknown error');
-					btn.disabled = false;
+				// Read the SSE stream
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+
+					// Decode the chunk and add to buffer
+					buffer += decoder.decode(value, { stream: true });
+
+					// Process complete SSE messages
+					let lines = buffer.split('\n');
+					buffer = lines.pop(); // Keep incomplete line in buffer
+
+					let currentEvent = null;
+					let currentData = '';
+
+					for (let line of lines) {
+						if (line.startsWith('event:')) {
+							currentEvent = line.substring(6).trim();
+						} else if (line.startsWith('data:')) {
+							currentData = line.substring(5).trim();
+						} else if (line === '') {
+							// Empty line marks end of message
+							if (currentData) {
+								try {
+									const data = JSON.parse(currentData);
+
+									if (currentEvent === 'done') {
+										// Import complete
+										status.className = 'import-status success';
+										status.textContent = 'Import complete! ' + data.imported + ' files imported, ' +
+										                     data.skipped + ' skipped, ' + data.errors + ' errors';
+										setTimeout(() => window.location.reload(), 2000);
+									} else {
+										// Progress update
+										let message = data.message;
+										if (data.total > 0) {
+											message += ' (' + data.imported + ' imported, ' + data.skipped + ' skipped, ' + data.errors + ' errors)';
+										}
+										status.className = 'import-status info';
+										status.textContent = message;
+									}
+								} catch (e) {
+									console.error('Error parsing SSE data:', e, currentData);
+								}
+
+								currentEvent = null;
+								currentData = '';
+							}
+						}
+					}
 				}
 			} catch (err) {
+				console.error('Import error:', err);
 				status.className = 'import-status error';
 				status.textContent = 'Error: ' + err.message;
 				btn.disabled = false;
@@ -5339,6 +5409,7 @@ func adminDeleteMultipleTracksHandler(w http.ResponseWriter, r *http.Request) {
 // adminImportFromSafecastHandler manually imports files from Safecast API for a date range.
 // POST /api/admin/import-from-safecast?password=xxx
 // Body: {"start_date": "2025-01-01", "end_date": "2025-01-31"}
+// Streams progress updates via Server-Sent Events
 func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -5380,6 +5451,30 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set up Server-Sent Events
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Helper function to send SSE progress updates
+	sendProgress := func(message string, imported, skipped, errors, total int) {
+		data := map[string]interface{}{
+			"message":  message,
+			"imported": imported,
+			"skipped":  skipped,
+			"errors":   errors,
+			"total":    total,
+		}
+		jsonData, _ := json.Marshal(data)
+		fmt.Fprintf(w, "data: %s\n\n", jsonData)
+		flusher.Flush()
+	}
+
 	// Import files from Safecast API
 	ctx := r.Context()
 	client := safecastfetcher.NewClient()
@@ -5388,6 +5483,9 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 	imported := 0
 	skipped := 0
 	errors := 0
+
+	// Send initial status
+	sendProgress("Fetching imports from Safecast API...", 0, 0, 0, 0)
 
 	// Fetch imports page by page
 	for page := 1; page <= 100; page++ { // Safety limit
@@ -5412,6 +5510,9 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 			allImports = append(allImports, imp)
 		}
 
+		// Update progress
+		sendProgress(fmt.Sprintf("Fetched page %d, found %d imports so far...", page, len(allImports)), 0, 0, 0, len(allImports))
+
 		// Stop if we've passed the end date
 		if len(imports) > 0 && imports[len(imports)-1].CreatedAt.After(endTime) {
 			break
@@ -5419,31 +5520,37 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[admin-import] Found %d imports in date range", len(allImports))
+	sendProgress(fmt.Sprintf("Found %d imports in date range. Starting import...", len(allImports)), 0, 0, 0, len(allImports))
 
 	// Import each file
-	for _, imp := range allImports {
+	for i, imp := range allImports {
 		// Check if already imported
 		exists, err := db.CheckImportExists(ctx, safecastfetcher.SourceTypeSafecastAPI, imp.ID)
 		if err != nil {
 			log.Printf("[admin-import] Error checking import #%d: %v", imp.ID, err)
 			errors++
+			sendProgress(fmt.Sprintf("Processing %d/%d: Error checking import #%d", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 			continue
 		}
 
 		if exists {
 			skipped++
+			sendProgress(fmt.Sprintf("Processing %d/%d: Skipped #%d (already imported)", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 			continue
 		}
 
 		// Download and import
+		sendProgress(fmt.Sprintf("Processing %d/%d: Downloading #%d (%s)...", i+1, len(allImports), imp.ID, imp.Name), imported, skipped, errors, len(allImports))
 		content, filename, err := safecastfetcher.DownloadLogFile(ctx, imp.SourceURL)
 		if err != nil {
 			log.Printf("[admin-import] import #%d: download failed: %v", imp.ID, err)
 			errors++
+			sendProgress(fmt.Sprintf("Processing %d/%d: Error downloading #%d", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 			continue
 		}
 
 		// Import using the importer function from the fetcher
+		sendProgress(fmt.Sprintf("Processing %d/%d: Importing #%d...", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 		trackID := GenerateSerialNumber()
 		bytesFile := safecastfetcher.NewBytesFile(content, filename)
 
@@ -5451,6 +5558,7 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("[admin-import] import #%d: process failed: %v", imp.ID, err)
 			errors++
+			sendProgress(fmt.Sprintf("Processing %d/%d: Error processing #%d", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 			continue
 		}
 
@@ -5469,25 +5577,32 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if _, err := db.InsertUpload(ctx, upload); err != nil {
-			log.Printf("[admin-import] import #%d: record upload failed: %v", imp.ID, err)
-			errors++
-			continue
+			// Skip if already exists (duplicate key error from previous partial import)
+			if !strings.Contains(err.Error(), "UNIQUE constraint") &&
+				!strings.Contains(err.Error(), "duplicate key") {
+				log.Printf("[admin-import] import #%d: record upload failed: %v", imp.ID, err)
+				errors++
+				sendProgress(fmt.Sprintf("Processing %d/%d: Error recording #%d", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
+				continue
+			}
+			// Duplicate upload record is OK - markers are what matter
+			log.Printf("[admin-import] import #%d: upload record already exists, continuing", imp.ID)
 		}
 
 		imported++
 		log.Printf("[admin-import] import #%d: success (track %s)", imp.ID, finalTrackID)
+		sendProgress(fmt.Sprintf("Processing %d/%d: Imported #%d ✓", i+1, len(allImports), imp.ID), imported, skipped, errors, len(allImports))
 	}
 
 	log.Printf("[admin-import] Complete: imported=%d skipped=%d errors=%d", imported, skipped, errors)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":   "success",
-		"imported": imported,
-		"skipped":  skipped,
-		"errors":   errors,
-		"total":    len(allImports),
-	})
+	// Send final status
+	finalMsg := fmt.Sprintf("Complete! Imported %d files, skipped %d, errors %d", imported, skipped, errors)
+	sendProgress(finalMsg, imported, skipped, errors, len(allImports))
+
+	// Send done event
+	fmt.Fprintf(w, "event: done\ndata: {\"status\": \"success\", \"imported\": %d, \"skipped\": %d, \"errors\": %d, \"total\": %d}\n\n", imported, skipped, errors, len(allImports))
+	flusher.Flush()
 }
 
 // adminTracksHandler lists all tracks in the system with statistics.
