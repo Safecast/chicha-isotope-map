@@ -23,7 +23,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/acme/autocert"
 	"html"
 	"html/template"
 	"image/color"
@@ -49,14 +48,16 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/acme/autocert"
+
 	"safecast-new-map/pkg/api"
-	"safecast-new-map/pkg/mapimport"
 	"safecast-new-map/pkg/database"
 	"safecast-new-map/pkg/database/drivers"
-	safecastfetcher "safecast-new-map/pkg/safecast-fetcher"
 	"safecast-new-map/pkg/jsonarchive"
 	"safecast-new-map/pkg/logger"
+	"safecast-new-map/pkg/mapimport"
 	"safecast-new-map/pkg/qrlogoext"
+	safecastfetcher "safecast-new-map/pkg/safecast-fetcher"
 	safecastrealtime "safecast-new-map/pkg/safecast-realtime"
 	"safecast-new-map/pkg/selfupgrade"
 	"safecast-new-map/pkg/spectrum"
@@ -4673,10 +4674,10 @@ func updateCoordinatesHandler(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":       "success",
+		"status":         "success",
 		"markersUpdated": rowsAffected,
-		"lat":          req.Lat,
-		"lon":          req.Lon,
+		"lat":            req.Lat,
+		"lon":            req.Lon,
 	})
 }
 
@@ -4926,11 +4927,36 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 		<span style="margin-left: 20px;">
 			<label for="limitSelect"><strong>Show:</strong></label>
 			<select id="limitSelect" onchange="changeLimit()" style="margin-left: 5px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary);">
-				<option value="100"` + func() string { if limit == 100 { return " selected" }; return "" }() + `>100</option>
-				<option value="500"` + func() string { if limit == 500 { return " selected" }; return "" }() + `>500</option>
-				<option value="1000"` + func() string { if limit == 1000 { return " selected" }; return "" }() + `>1000</option>
-				<option value="5000"` + func() string { if limit == 5000 { return " selected" }; return "" }() + `>5000</option>
-				<option value="10000"` + func() string { if limit >= 10000 { return " selected" }; return "" }() + `>All</option>
+				<option value="100"` + func() string {
+		if limit == 100 {
+			return " selected"
+		}
+		return ""
+	}() + `>100</option>
+				<option value="500"` + func() string {
+		if limit == 500 {
+			return " selected"
+		}
+		return ""
+	}() + `>500</option>
+				<option value="1000"` + func() string {
+		if limit == 1000 {
+			return " selected"
+		}
+		return ""
+	}() + `>1000</option>
+				<option value="5000"` + func() string {
+		if limit == 5000 {
+			return " selected"
+		}
+		return ""
+	}() + `>5000</option>
+				<option value="10000"` + func() string {
+		if limit >= 10000 {
+			return " selected"
+		}
+		return ""
+	}() + `>All</option>
 			</select>
 		</span>`
 
@@ -4940,7 +4966,6 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 
 	html += `
 	</div>`
-
 
 	if len(uploads) == 0 {
 		html += `<div class="empty">No uploads found. Upload a spectrum file (.n42 or .spe) to see it appear here.</div>`
@@ -6301,7 +6326,7 @@ func adminBackfillHandler(w http.ResponseWriter, r *http.Request) {
 		if _, uploadErr := db.InsertUpload(ctx, upload); uploadErr != nil {
 			// Skip if already exists (duplicate key error)
 			if !strings.Contains(uploadErr.Error(), "UNIQUE constraint") &&
-			   !strings.Contains(uploadErr.Error(), "duplicate key") {
+				!strings.Contains(uploadErr.Error(), "duplicate key") {
 				log.Printf("Warning: failed to backfill upload record for %s: %v", filename, uploadErr)
 			}
 			continue
@@ -7564,14 +7589,14 @@ func main() {
 	http.HandleFunc("/api/geoip", gzipHandler(geoIPHandler))
 	http.HandleFunc("/s/", shortRedirectHandler)
 	http.HandleFunc("/api/docs", apiDocsHandler)
-	http.HandleFunc("/api/spectrum/", spectrumHandler)                  // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
-	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)  // GET /api/markers/spectra
-	http.HandleFunc("/api/update-coordinates", updateCoordinatesHandler) // POST /api/update-coordinates
-	http.HandleFunc("/api/admin/uploads", adminUploadsHandler)           // GET /api/admin/uploads?password=<pwd>
-	http.HandleFunc("/api/admin/tracks", adminTracksHandler)             // GET /api/admin/tracks?password=<pwd>
-	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)         // POST /api/admin/backfill?password=<pwd>
-	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)        // POST /api/admin/delete
-	http.HandleFunc("/api/admin/delete-multiple", adminDeleteMultipleTracksHandler) // POST /api/admin/delete-multiple
+	http.HandleFunc("/api/spectrum/", spectrumHandler)                                 // GET /api/spectrum/{markerID} and /api/spectrum/{markerID}/download
+	http.HandleFunc("/api/markers/spectra", markersWithSpectraHandler)                 // GET /api/markers/spectra
+	http.HandleFunc("/api/update-coordinates", updateCoordinatesHandler)               // POST /api/update-coordinates
+	http.HandleFunc("/api/admin/uploads", adminUploadsHandler)                         // GET /api/admin/uploads?password=<pwd>
+	http.HandleFunc("/api/admin/tracks", adminTracksHandler)                           // GET /api/admin/tracks?password=<pwd>
+	http.HandleFunc("/api/admin/backfill", adminBackfillHandler)                       // POST /api/admin/backfill?password=<pwd>
+	http.HandleFunc("/api/admin/delete", adminDeleteTrackHandler)                      // POST /api/admin/delete
+	http.HandleFunc("/api/admin/delete-multiple", adminDeleteMultipleTracksHandler)    // POST /api/admin/delete-multiple
 	http.HandleFunc("/api/admin/import-from-safecast", adminImportFromSafecastHandler) // POST /api/admin/import-from-safecast
 
 	// API endpoints ship JSON/archives. Keeping registration close to other

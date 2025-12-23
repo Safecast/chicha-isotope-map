@@ -157,3 +157,7 @@ nohup: ignoring input
 2025/12/23 12:42:57 [admin-import] Complete: imported=0 skipped=0 errors=0
 2025/12/23 12:46:31 realtime markers: 0 lat[0.000000,0.000000] lon[0.000000,0.000000]
 2025/12/23 12:46:41 realtime markers: 0 lat[0.000000,0.000000] lon[0.000000,0.000000]
+2025/12/23 12:47:08 realtime fetch: devices 1499
+2025/12/23 12:47:08 realtime sample: id=geigiecast:61099 name="" lat=22.318070 lon=114.157710 val=53.000000 unit=lnd_7318u
+2025/12/23 12:47:08 realtime poll: devices 113 stored 357 next=5m0s
+2025/12/23 12:47:08 realtime summary: ??:1 avg=0.09 Canada (CA):2 avg=0.06 Georgia (GE):1 avg=0.09 Germany (DE):1 avg=0.10 Japan (JP):31 avg=0.20 Sudan (SD):1 avg=0.13 Switzerland (CH):1 avg=0.12 Taiwan (TW):2 avg=0.12 Ukraine (UA):52 avg=0.19 United States of America (US):21 avg=0.10 added=0 removed=0
