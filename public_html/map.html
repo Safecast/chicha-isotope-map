@@ -1821,20 +1821,20 @@ function interpolateColor(color1, color2, factor) {
 
 // Calculate marker radius based on zoom level
 function getRadius(doseRate, zoomLevel) {
-  // PERFORMANCE OPTIMIZATION: Significantly reduce marker size at low zoom levels
-  // to improve rendering performance when displaying tens of thousands of markers
+  // PERFORMANCE OPTIMIZATION: Balance between performance and usability
+  // Markers need to be small enough for performance but large enough to click
   const k = 1;                               // scale by ~2
   let r;
   
   if (zoomLevel <= 7) {
-    // At zoom 7 and below, use much smaller markers for massive datasets
-    r = Math.pow(2, (zoomLevel - 10)/3.5) * k;  // Smaller denominator = smaller markers
+    // At zoom 7 and below, use smaller markers but keep them clickable
+    r = Math.pow(2, (zoomLevel - 10)/3.0) * k;  // Slightly larger than before (was 3.5)
   } else {
     // Normal scaling for zoom 8+
     r = Math.pow(2, (zoomLevel - 10)/2.5) * k;
   }
   
-  return Math.max(r, 1.5);  // Reduced minimum from 2 to 1.5 pixels
+  return Math.max(r, 3);  // Minimum 3 pixels for clickability (was 1.5)
 }
 
 // Thresholds for realtime freshness expressed in seconds so both the
@@ -3676,14 +3676,24 @@ function updateMarkers(){
 
   // If filters changed, clear all markers to re-filter them
   if (filterChanged) {
-    // Flush any pending batched markers first
-    flushMarkerBatch();
+    // CRITICAL: Clear the batch queue FIRST before flushing
+    // This prevents queued markers from being added after we clear the map
+    markerBatch.length = 0;  // Clear the batch array
+    if (batchFlushTimer) {
+      clearTimeout(batchFlushTimer);
+      batchFlushTimer = null;
+    }
+    
     // Remove all markers from map
     for (const key in circleMarkers) {
       const marker = circleMarkers[key];
       map.removeLayer(marker);
     }
     circleMarkers = {};
+    
+    // Clear tile cache when filters change so we fetch fresh data
+    tileCache.clear();
+    console.log('Speed filter changed - cleared all markers, batch queue, and cache');
   } else {
     // Otherwise, remove only markers that are now off-screen
     const markersToRemove = [];
@@ -3773,12 +3783,8 @@ function updateMarkers(){
 
 // Helper function to render a cached marker
 function renderCachedMarker(m, tracks, minTs, maxTs, savedRange, zoom) {
-  // PERFORMANCE: At very low zoom levels (< 7), sample markers to reduce render count
-  // Only render every Nth marker based on zoom level
-  if (zoom < 7) {
-    const sampleRate = zoom < 6 ? 4 : 2;  // Skip 75% at zoom < 6, 50% at zoom 6
-    if (Math.random() > (1 / sampleRate)) return;  // Randomly skip markers
-  }
+  // NOTE: Server-side density-based sampling is now enabled for zoom < 8
+  // No client-side sampling needed - server already reduces data at low zoom
   
   const isLive = m.speed < 0;
   if (!isLive && m.trackID) tracks.add(m.trackID);
@@ -3917,12 +3923,8 @@ function setupMarkerStream(es, tracks, minTs, maxTs, savedRange, tileIndex, cach
   es.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     
-    // PERFORMANCE: At very low zoom levels (< 7), sample markers to reduce render count
-    // Only render every Nth marker based on zoom level
-    if (zoom < 7) {
-      const sampleRate = zoom < 6 ? 4 : 2;  // Skip 75% at zoom < 6, 50% at zoom 6
-      if (Math.random() > (1 / sampleRate)) return;  // Randomly skip markers
-    }
+    // NOTE: Server-side density-based sampling is now enabled for zoom < 8
+    // No client-side sampling needed - server already reduces data at low zoom
     
     const isLive = m.speed < 0; // negative speed denotes realtime marker
     if (!isLive && m.trackID) tracks.add(m.trackID);
