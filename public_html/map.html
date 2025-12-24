@@ -9,6 +9,10 @@
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="/static/leaflet.css">
     <link rel="stylesheet" href="/static/nouislider.min.css">
+    
+    <!-- Leaflet MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 
 		<!-- favicon -->
 		<link rel="apple-touch-icon" sizes="180x180" href="/static/images/apple-touch-icon.png">
@@ -1717,6 +1721,9 @@ body, html {
 
     <!-- Load Leaflet JavaScript library -->
     <script src="/static/leaflet.js"></script>
+    
+    <!-- Leaflet MarkerCluster plugin -->
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
     <!-- Chart.js for spectrum visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -3715,21 +3722,33 @@ function updateMarkers(){
   let minTs = Infinity, maxTs = -Infinity;
 
   // PARALLEL TILE-BASED LOADING WITH CACHING
-  // Split viewport into 2x2 grid (4 tiles) and fetch in parallel
+  // At low zoom (<=7): Use 1 large tile for simplicity
+  // At high zoom (>=8): Split viewport into 2x2 grid (4 tiles) for parallel loading
   // Cache enabled for all zoom levels (except track view)
   // Disable during background refresh to reduce database load
   const useTiles = !currentTrackID && !window.isBackgroundRefresh; // Use tiles + cache for all zoom levels, except track view and background refresh
+  const useSingleTile = zoom <= 7; // At low zoom, use single tile to reduce request overhead
 
   if (useTiles) {
-    const latMid = (baseParams.minLat + baseParams.maxLat) / 2;
-    const lonMid = (baseParams.minLon + baseParams.maxLon) / 2;
+    let tiles;
+    
+    if (useSingleTile) {
+      // Single large tile at low zoom for simpler batching
+      tiles = [
+        { minLat: baseParams.minLat, maxLat: baseParams.maxLat, minLon: baseParams.minLon, maxLon: baseParams.maxLon }
+      ];
+    } else {
+      // 2x2 grid at high zoom for parallel loading
+      const latMid = (baseParams.minLat + baseParams.maxLat) / 2;
+      const lonMid = (baseParams.minLon + baseParams.maxLon) / 2;
 
-    const tiles = [
-      { minLat: baseParams.minLat, maxLat: latMid, minLon: baseParams.minLon, maxLon: lonMid }, // SW
-      { minLat: baseParams.minLat, maxLat: latMid, minLon: lonMid, maxLon: baseParams.maxLon }, // SE
-      { minLat: latMid, maxLat: baseParams.maxLat, minLon: baseParams.minLon, maxLon: lonMid }, // NW
-      { minLat: latMid, maxLat: baseParams.maxLat, minLon: lonMid, maxLon: baseParams.maxLon }  // NE
-    ];
+      tiles = [
+        { minLat: baseParams.minLat, maxLat: latMid, minLon: baseParams.minLon, maxLon: lonMid }, // SW
+        { minLat: baseParams.minLat, maxLat: latMid, minLon: lonMid, maxLon: baseParams.maxLon }, // SE
+        { minLat: latMid, maxLat: baseParams.maxLat, minLon: baseParams.minLon, maxLon: lonMid }, // NW
+        { minLat: latMid, maxLat: baseParams.maxLat, minLon: lonMid, maxLon: baseParams.maxLon }  // NE
+      ];
+    }
 
     let activeSources = 0;
 
@@ -3890,9 +3909,10 @@ function renderCachedMarker(m, tracks, minTs, maxTs, savedRange, zoom) {
           }
         });
         
+        // Click marker to directly view the track
         marker.on('click', function() {
-          if (!this._popup) {
-            this.bindPopup(getPopupContent(m));
+          if (m.trackID) {
+            viewTrack(m.trackID);
           }
         });
       })(m, marker);
@@ -4047,9 +4067,10 @@ function setupMarkerStream(es, tracks, minTs, maxTs, savedRange, tileIndex, cach
             }
           });
           
+          // Click marker to directly view the track
           marker.on('click', function() {
-            if (!this._popup) {
-              this.bindPopup(getPopupContent(m));
+            if (m.trackID) {
+              viewTrack(m.trackID);
             }
           });
         })(m, marker);
@@ -6225,7 +6246,7 @@ let debounceTimeout;
 
 function debounceUpdateMarkers() {
   clearTimeout(debounceTimeout);
-  debounceTimeout = setTimeout(updateMarkers, 300);
+  debounceTimeout = setTimeout(updateMarkers, 150);  // Increased from 300ms for smoother rapid panning
 }
 
 function adjustMarkerRadius() {

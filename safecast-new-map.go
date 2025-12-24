@@ -6259,12 +6259,16 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Page numbers
 	startPage := page - 2
-	if startPage < 1 { startPage = 1 }
+	if startPage < 1 {
+		startPage = 1
+	}
 	endPage := startPage + 4
 	if endPage > totalPages {
 		endPage = totalPages
 		startPage = endPage - 4
-		if startPage < 1 { startPage = 1 }
+		if startPage < 1 {
+			startPage = 1
+		}
 	}
 
 	// First page
@@ -6969,27 +6973,28 @@ func calculateSampleRate(zoom int, minLat, minLon, maxLat, maxLon float64) float
 	if zoom >= 8 {
 		return 1.0
 	}
-	
+
 	// Calculate viewport area (approximate)
 	latSpan := maxLat - minLat
 	lonSpan := maxLon - minLon
 	area := latSpan * lonSpan
-	
+
 	// For very large areas at low zoom, more aggressive sampling is needed
 	// At zoom 7, Europe view is ~9.5 lat × 19.5 lon ≈ 185 sq degrees
 	_ = area // Used for future density calculations
-	
+
 	// Sample rate based on zoom level to achieve target performance
-	// Zoom 7: ~25% (1 in 4) as requested
-	// Zoom 6: ~15% (1 in 6-7)
-	// Zoom 5 and below: ~10% (1 in 10)
+	// More aggressive sampling for smoother performance
+	// Zoom 7: ~10% (1 in 10) - down from 25%
+	// Zoom 6: ~5% (1 in 20)  - down from 15%
+	// Zoom 5 and below: ~2% (1 in 50) - down from 10%
 	switch zoom {
 	case 7:
-		return 0.25 // Send 25% of markers (skip 75%)
-	case 6:
-		return 0.15 // Send 15% of markers (skip 85%)
-	default: // zoom <= 5
 		return 0.10 // Send 10% of markers (skip 90%)
+	case 6:
+		return 0.05 // Send 5% of markers (skip 95%)
+	default: // zoom <= 5
+		return 0.02 // Send 2% of markers (skip 98%)
 	}
 }
 
@@ -6997,23 +7002,23 @@ func calculateSampleRate(zoom int, minLat, minLon, maxLat, maxLon float64) float
 // Returns a new channel that emits only a fraction of markers based on sampleRate.
 func sampleMarkerChannel(ctx context.Context, in <-chan database.Marker, sampleRate float64) <-chan database.Marker {
 	out := make(chan database.Marker, 100)
-	
+
 	go func() {
 		defer close(out)
 		counter := 0
-		
+
 		for m := range in {
 			// Deterministic sampling based on marker ID for consistency
 			// Use modulo to ensure even distribution
 			counter++
-			
+
 			// Convert sample rate to skip pattern
 			// e.g., 0.25 = keep every 4th marker
 			skipInterval := int(1.0 / sampleRate)
 			if skipInterval < 1 {
 				skipInterval = 1
 			}
-			
+
 			// Keep marker if counter is divisible by skip interval
 			if counter%skipInterval == 0 {
 				select {
@@ -7024,7 +7029,7 @@ func sampleMarkerChannel(ctx context.Context, in <-chan database.Marker, sampleR
 			}
 		}
 	}()
-	
+
 	return out
 }
 
@@ -7038,15 +7043,15 @@ func streamMarkersHandler(w http.ResponseWriter, r *http.Request) {
 	maxLat, _ := strconv.ParseFloat(q.Get("maxLat"), 64)
 	maxLon, _ := strconv.ParseFloat(q.Get("maxLon"), 64)
 	trackID := q.Get("trackID")
-	
+
 	// PERFORMANCE: Calculate density-based sampling rate for low zoom levels
 	// This reduces network traffic and client-side processing for dense views
 	sampleRate := calculateSampleRate(zoom, minLat, minLon, maxLat, maxLon)
 	if sampleRate < 1.0 {
-		log.Printf("density reduction: zoom=%d rate=%.2f (sending ~%.0f%% of markers)", 
+		log.Printf("density reduction: zoom=%d rate=%.2f (sending ~%.0f%% of markers)",
 			zoom, sampleRate, sampleRate*100)
 	}
-	
+
 	// Choose streaming source: either entire map or a single track.
 	ctx := r.Context()
 	var (
