@@ -1076,6 +1076,40 @@ body, html {
           display: flex;
           align-items: center;
           gap: 14px;
+          flex: 1;
+        }
+
+        .live-modal-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+        }
+
+        .live-modal-dose-display {
+          text-align: right;
+          min-width: 180px;
+        }
+
+        .live-modal-dose-value {
+          font-size: 2.5rem;
+          font-weight: bold;
+          line-height: 1.2;
+          margin: 0;
+        }
+
+        .live-modal-dose-alt {
+          font-size: 1rem;
+          color: var(--modal-text);
+          opacity: 0.8;
+          margin: 4px 0;
+        }
+
+        .live-modal-dose-time {
+          font-size: 0.85rem;
+          color: var(--modal-text);
+          opacity: 0.7;
+          margin: 8px 0 0 0;
         }
 
         .live-modal-heart {
@@ -1529,12 +1563,15 @@ body, html {
 
 <div id="liveModal">
   <div class="live-modal-content">
-    <div class="live-modal-header">
-      <img src="/static/images/safecast-heart-logo.png" alt="Safecast realtime sensor" class="live-modal-heart">
-      <div>
-        <h3 id="liveModalTitle" class="live-modal-title"></h3>
-        <p id="liveModalDescription" class="live-modal-description"></p>
+    <div class="live-modal-top">
+      <div class="live-modal-header">
+        <img src="/static/images/safecast-heart-logo.png" alt="Safecast realtime sensor" class="live-modal-heart">
+        <div>
+          <h3 id="liveModalTitle" class="live-modal-title"></h3>
+          <p id="liveModalDescription" class="live-modal-description"></p>
+        </div>
       </div>
+      <div id="liveModalDose" class="live-modal-dose-display"></div>
     </div>
     <div id="liveModalMeta" class="live-modal-meta"></div>
     <div id="liveModalExtra" class="live-modal-meta"></div>
@@ -3659,9 +3696,22 @@ function renderCachedMarker(m, tracks, minTs, maxTs, savedRange, zoom) {
         }
       });
       
+      // Directly open chart modal on click for RT sensors
       marker.on('click', function() {
-        if (!this._popup) {
-          this.bindPopup(getPopupContent(m));
+        const deviceID = m.deviceID || (m.trackID ? m.trackID.replace(/^live:/, '') : '');
+        if (deviceID) {
+          const fallback = {
+            device: deviceID,
+            name: m.deviceName || '',
+            transport: m.transport || '',
+            tube: m.tube || '',
+            country: m.country || '',
+            lat: m.lat || '',
+            lon: m.lon || '',
+            doseRate: m.doseRate || null,
+            date: m.date || null,
+          };
+          openLiveModal(deviceID, fallback);
         }
       });
     })(m, marker);
@@ -3792,9 +3842,22 @@ function setupMarkerStream(es, tracks, minTs, maxTs, savedRange, tileIndex, cach
           }
         });
         
+        // Directly open chart modal on click for RT sensors
         marker.on('click', function() {
-          if (!this._popup) {
-            this.bindPopup(getPopupContent(m));
+          const deviceID = m.deviceID || (m.trackID ? m.trackID.replace(/^live:/, '') : '');
+          if (deviceID) {
+            const fallback = {
+              device: deviceID,
+              name: m.deviceName || '',
+              transport: m.transport || '',
+              tube: m.tube || '',
+              country: m.country || '',
+              lat: m.lat || '',
+              lon: m.lon || '',
+              doseRate: m.doseRate || null,
+              date: m.date || null,
+            };
+            openLiveModal(deviceID, fallback);
           }
         });
       })(m, marker);
@@ -5028,12 +5091,37 @@ async function openLiveModal(deviceID, fallback) {
     transport: fallback && fallback.transport ? fallback.transport : '',
     country: fallback && fallback.country ? fallback.country : '',
     tube: fallback && fallback.tube ? fallback.tube : '',
+    doseRate: fallback && fallback.doseRate ? fallback.doseRate : null,
+    date: fallback && fallback.date ? fallback.date : null,
   };
 
   if (titleEl) titleEl.textContent = fallbackMarker.deviceName || translate('live_marker_title');
   if (descEl) descEl.textContent = describeLiveSensor(fallbackMarker);
   if (metaEl) metaEl.innerHTML = buildDeviceMeta(fallbackMarker);
   if (extraEl) extraEl.innerHTML = '';
+  
+  // Initialize dose display area (will update with real data later)
+  const doseEl = document.getElementById('liveModalDose');
+  if (doseEl) {
+    if (fallbackMarker.doseRate !== null && fallbackMarker.doseRate !== undefined) {
+      console.log('Fallback dose rate:', fallbackMarker.doseRate);
+      const primaryValue = formatPrimaryUnit(fallbackMarker.doseRate);
+      const altValue = formatSecondaryUnit(fallbackMarker.doseRate);
+      const primaryUnit = currentUnit === 'uR' ? 'µR/h' : 'µSv/h';
+      const altUnit = currentUnit === 'uR' ? 'µSv/h' : 'µR/h';
+      
+      doseEl.innerHTML = `
+        <div class="live-modal-dose-value" style="color:${getGradientColor(fallbackMarker.doseRate)};">${primaryValue} <span style="font-size:0.5em;">${primaryUnit}</span></div>
+        <div class="live-modal-dose-alt">${altValue} ${altUnit}</div>
+      `;
+    } else {
+      console.log('No fallback dose rate available');
+      doseEl.innerHTML = '<div class="live-modal-dose-value">--</div>';
+    }
+  } else {
+    console.error('liveModalDose element not found!');
+  }
+  
   if (empty) { empty.textContent = ''; empty.style.display = 'none'; }
   if (canvas) {
     const ctx = canvas.getContext('2d');
@@ -5057,6 +5145,32 @@ async function openLiveModal(deviceID, fallback) {
 
     if (titleEl) titleEl.textContent = merged.deviceName || translate('live_marker_title');
     if (descEl) descEl.textContent = describeLiveSensor(merged);
+    
+    // Update dose display with latest data from history
+    const doseEl = document.getElementById('liveModalDose');
+    if (doseEl && data.series && data.series.day && data.series.day.length > 0) {
+      // Get the most recent measurement
+      const latest = data.series.day[data.series.day.length - 1];
+      console.log('Latest data point:', latest);
+      if (latest && typeof latest.value === 'number') {
+        const primaryValue = formatPrimaryUnit(latest.value);
+        const altValue = formatSecondaryUnit(latest.value);
+        const primaryUnit = currentUnit === 'uR' ? 'µR/h' : 'µSv/h';
+        const altUnit = currentUnit === 'uR' ? 'µSv/h' : 'µR/h';
+        const lastSeen = latest.time ? formatLastSeen(latest.time) : '';
+        const local = approximateLocalTime(merged.lat, merged.lon);
+        
+        doseEl.innerHTML = `
+          <div class="live-modal-dose-value" style="color:${getGradientColor(latest.value)};">${primaryValue} <span style="font-size:0.5em;">${primaryUnit}</span></div>
+          <div class="live-modal-dose-alt">${altValue} ${altUnit}</div>
+          ${lastSeen ? `<div class="live-modal-dose-time"><strong>${translate('live_marker_last_seen')}:</strong> ${escapeHtml(lastSeen)}</div>` : ''}
+          ${local ? `<div class="live-modal-dose-time"><strong>${translate('live_marker_local_time')}:</strong> ${escapeHtml(local.text)} (${escapeHtml(local.zone)})</div>` : ''}
+        `;
+        console.log('Dose display updated with:', primaryValue, primaryUnit);
+      }
+    } else {
+      console.log('No series data available, data:', data);
+    }
     
     // Update basic meta
     if (metaEl) {
