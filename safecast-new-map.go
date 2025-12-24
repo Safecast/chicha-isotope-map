@@ -5937,49 +5937,105 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get limit parameter
-	limit := 1000
+	// Get limit parameter (page size)
+	limit := 500 // Default to 500 per page
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
 			limit = parsedLimit
 		}
 	}
 
+	// Get page parameter
+	page := 1
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		if parsedPage, err := strconv.Atoi(pageStr); err == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+
+	// Calculate offset
+	offset := (page - 1) * limit
+
+	// Get search parameter
+	search := r.URL.Query().Get("search")
+
 	ctx := r.Context()
 
-	// Query all tracks with statistics (excluding realtime "live:" tracks)
-	query := `
-		SELECT
-			t.trackID,
-			COUNT(DISTINCT m.id) as marker_count,
-			MIN(m.date) as first_date,
-			MAX(m.date) as last_date,
-			COALESCE(SUM(CASE WHEN m.has_spectrum = 1 THEN 1 ELSE 0 END), 0) as spectra_count
-		FROM tracks t
-		LEFT JOIN markers m ON t.trackID = m.trackID
-		WHERE t.trackID NOT LIKE ?
-		GROUP BY t.trackID
-		ORDER BY last_date DESC
-		LIMIT ?
-	`
-	args := []interface{}{"live:%", limit}
+	// Build WHERE conditions for search
+	var whereConditions []string
+	var countArgs []interface{}
+	paramCount := 0
 
+	// Always exclude live tracks
+	paramCount++
 	if *dbType == "pgx" {
+		whereConditions = append(whereConditions, fmt.Sprintf("trackID NOT LIKE $%d", paramCount))
+	} else {
+		whereConditions = append(whereConditions, "trackID NOT LIKE ?")
+	}
+	countArgs = append(countArgs, "live:%")
+
+	// Add search condition
+	if search != "" {
+		paramCount++
+		if *dbType == "pgx" {
+			whereConditions = append(whereConditions, fmt.Sprintf("(trackID ILIKE $%d OR CAST(marker_count AS TEXT) ILIKE $%d OR CAST(spectra_count AS TEXT) ILIKE $%d)", paramCount, paramCount, paramCount))
+			countArgs = append(countArgs, "%"+search+"%")
+		} else {
+			whereConditions = append(whereConditions, "(trackID LIKE ? OR CAST(marker_count AS TEXT) LIKE ? OR CAST(spectra_count AS TEXT) LIKE ?)")
+			searchPattern := "%" + search + "%"
+			for i := 0; i < 3; i++ {
+				countArgs = append(countArgs, searchPattern)
+			}
+		}
+	}
+
+	whereClause := "WHERE " + whereConditions[0]
+	for i := 1; i < len(whereConditions); i++ {
+		whereClause += " AND " + whereConditions[i]
+	}
+
+	// Get total count for pagination
+	var totalCount int
+	countQuery := "SELECT COUNT(*) FROM track_statistics " + whereClause
+	err := db.DB.QueryRowContext(ctx, countQuery, countArgs...).Scan(&totalCount)
+	if err != nil {
+		log.Printf("Error counting tracks: %v", err)
+		http.Error(w, "Failed to count tracks", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := (totalCount + limit - 1) / limit
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	// Build args for main query
+	args := make([]interface{}, len(countArgs))
+	copy(args, countArgs)
+	args = append(args, limit, offset)
+
+	// Query tracks using materialized view for performance
+	var query string
+	if *dbType == "pgx" {
+		paramCount++
+		limitParam := paramCount
+		paramCount++
+		offsetParam := paramCount
 		query = `
-			SELECT
-				t.trackID,
-				COUNT(DISTINCT m.id) as marker_count,
-				MIN(m.date) as first_date,
-				MAX(m.date) as last_date,
-				COALESCE(SUM(CASE WHEN m.has_spectrum = true THEN 1 ELSE 0 END), 0) as spectra_count
-			FROM tracks t
-			LEFT JOIN markers m ON t.trackID = m.trackID
-			WHERE t.trackID NOT LIKE $1
-			GROUP BY t.trackID
+			SELECT trackID, marker_count, first_date, last_date, spectra_count
+			FROM track_statistics
+			` + whereClause + `
 			ORDER BY last_date DESC
-			LIMIT $2
-		`
-		args = []interface{}{"live:%", limit}
+			LIMIT $` + strconv.Itoa(limitParam) + ` OFFSET $` + strconv.Itoa(offsetParam)
+	} else {
+		query = `
+			SELECT trackID, marker_count, first_date, last_date, spectra_count
+			FROM track_statistics
+			` + whereClause + `
+			ORDER BY last_date DESC
+			LIMIT ? OFFSET ?`
 	}
 
 	rows, err := db.DB.QueryContext(ctx, query, args...)
@@ -6132,7 +6188,118 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 		<a href="/" class="back-to-map-btn">🗺️ Back to Map</a>
 	</div>
 	<div class="summary">
-		<strong>Total Tracks:</strong> ` + strconv.Itoa(len(tracks)) + ` (showing up to ` + strconv.Itoa(limit) + `)
+		<strong>Total Tracks:</strong> ` + strconv.Itoa(totalCount) + ` tracks
+		<span style="margin-left: 20px;">
+			<strong>Page ` + strconv.Itoa(page) + ` of ` + strconv.Itoa(totalPages) + `</strong>
+			(showing ` + strconv.Itoa(len(tracks)) + ` tracks)
+		</span>
+		<span style="margin-left: 20px;">
+			<label for="limitSelect"><strong>Per page:</strong></label>
+			<select id="limitSelect" onchange="changeLimit()" style="margin-left: 5px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary);">
+				<option value="100"` + func() string {
+		if limit == 100 {
+			return " selected"
+		}
+		return ""
+	}() + `>100</option>
+				<option value="250"` + func() string {
+		if limit == 250 {
+			return " selected"
+		}
+		return ""
+	}() + `>250</option>
+				<option value="500"` + func() string {
+		if limit == 500 {
+			return " selected"
+		}
+		return ""
+	}() + `>500</option>
+				<option value="1000"` + func() string {
+		if limit == 1000 {
+			return " selected"
+		}
+		return ""
+	}() + `>1000</option>
+			</select>
+		</span>
+		<span style="margin-left: 20px;">
+			<label for="searchInput"><strong>Search:</strong></label>
+			<input type="text" id="searchInput" value="` + search + `" placeholder="Search all fields..." style="margin-left: 5px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); width: 200px;" onkeypress="if(event.key === 'Enter') performSearch()">
+			<button onclick="performSearch()" style="margin-left: 5px; padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--link-color); color: white; cursor: pointer;">🔍</button>
+			` + func() string {
+		if search != "" {
+			return `<button onclick="clearSearch()" style="margin-left: 5px; padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); cursor: pointer;">Clear</button>`
+		}
+		return ""
+	}() + `
+		</span>`
+
+	if search != "" {
+		html += ` | <strong>Search:</strong> "` + search + `"`
+	}
+
+	// Add pagination controls inline in the summary
+	html += `<div style="margin-top: 10px;">`
+
+	// Helper function to build query parameters
+	buildURL := func(pageNum int) string {
+		urlStr := "?password=" + password + "&page=" + strconv.Itoa(pageNum) + "&limit=" + strconv.Itoa(limit)
+		if search != "" {
+			urlStr += "&search=" + url.QueryEscape(search)
+		}
+		return urlStr
+	}
+
+	// Previous button
+	if page > 1 {
+		html += `<a href="` + buildURL(page-1) + `" class="page-btn">&laquo; Previous</a>`
+	} else {
+		html += `<span class="page-btn disabled">&laquo; Previous</span>`
+	}
+
+	// Page numbers
+	startPage := page - 2
+	if startPage < 1 { startPage = 1 }
+	endPage := startPage + 4
+	if endPage > totalPages {
+		endPage = totalPages
+		startPage = endPage - 4
+		if startPage < 1 { startPage = 1 }
+	}
+
+	// First page
+	if startPage > 1 {
+		html += `<a href="` + buildURL(1) + `" class="page-btn">1</a>`
+		if startPage > 2 {
+			html += `<span class="page-btn disabled">...</span>`
+		}
+	}
+
+	// Page range
+	for i := startPage; i <= endPage; i++ {
+		if i == page {
+			html += `<span class="page-btn active">` + strconv.Itoa(i) + `</span>`
+		} else {
+			html += `<a href="` + buildURL(i) + `" class="page-btn">` + strconv.Itoa(i) + `</a>`
+		}
+	}
+
+	// Last page
+	if endPage < totalPages {
+		if endPage < totalPages-1 {
+			html += `<span class="page-btn disabled">...</span>`
+		}
+		html += `<a href="` + buildURL(totalPages) + `" class="page-btn">` + strconv.Itoa(totalPages) + `</a>`
+	}
+
+	// Next button
+	if page < totalPages {
+		html += `<a href="` + buildURL(page+1) + `" class="page-btn">Next &raquo;</a>`
+	} else {
+		html += `<span class="page-btn disabled">Next &raquo;</span>`
+	}
+
+	html += `</div>
 	</div>`
 
 	if len(tracks) == 0 {
@@ -6265,6 +6432,36 @@ func adminTracksHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			})
 			.catch(err => alert('Error: ' + err));
+		}
+
+		// Change limit and reload page, reset to page 1
+		function changeLimit() {
+			const limit = document.getElementById('limitSelect').value;
+			const url = new URL(window.location.href);
+			url.searchParams.set('limit', limit);
+			url.searchParams.set('page', '1');
+			window.location.href = url.toString();
+		}
+
+		// Perform search
+		function performSearch() {
+			const searchValue = document.getElementById('searchInput').value;
+			const url = new URL(window.location.href);
+			if (searchValue.trim()) {
+				url.searchParams.set('search', searchValue.trim());
+			} else {
+				url.searchParams.delete('search');
+			}
+			url.searchParams.set('page', '1'); // Reset to page 1 when searching
+			window.location.href = url.toString();
+		}
+
+		// Clear search
+		function clearSearch() {
+			const url = new URL(window.location.href);
+			url.searchParams.delete('search');
+			url.searchParams.set('page', '1'); // Reset to page 1 when clearing
+			window.location.href = url.toString();
 		}
 
 		function backfillUploads() {
