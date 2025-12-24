@@ -1076,7 +1076,6 @@ body, html {
           display: flex;
           align-items: center;
           gap: 14px;
-          flex: 1;
         }
 
         .live-modal-top {
@@ -1086,30 +1085,43 @@ body, html {
           gap: 20px;
         }
 
+        .live-modal-meta-wrapper {
+          flex: 1;
+        }
+
         .live-modal-dose-display {
           text-align: right;
-          min-width: 180px;
+          min-width: 200px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
         }
 
         .live-modal-dose-value {
-          font-size: 2.5rem;
+          font-size: 3.5rem;
           font-weight: bold;
-          line-height: 1.2;
+          line-height: 1;
           margin: 0;
         }
 
         .live-modal-dose-alt {
-          font-size: 1rem;
+          font-size: 1.5rem;
           color: var(--modal-text);
-          opacity: 0.8;
-          margin: 4px 0;
+          margin: 0;
+        }
+
+        .live-modal-dose-temp {
+          font-size: 0.9rem;
+          color: var(--modal-text);
+          opacity: 0.75;
+          margin: 0;
         }
 
         .live-modal-dose-time {
           font-size: 0.85rem;
           color: var(--modal-text);
           opacity: 0.7;
-          margin: 8px 0 0 0;
+          margin: 0;
         }
 
         .live-modal-heart {
@@ -1563,18 +1575,20 @@ body, html {
 
 <div id="liveModal">
   <div class="live-modal-content">
+    <div class="live-modal-header">
+      <img src="/static/images/safecast-heart-logo.png" alt="Safecast realtime sensor" class="live-modal-heart">
+      <div>
+        <h3 id="liveModalTitle" class="live-modal-title"></h3>
+        <p id="liveModalDescription" class="live-modal-description"></p>
+      </div>
+    </div>
     <div class="live-modal-top">
-      <div class="live-modal-header">
-        <img src="/static/images/safecast-heart-logo.png" alt="Safecast realtime sensor" class="live-modal-heart">
-        <div>
-          <h3 id="liveModalTitle" class="live-modal-title"></h3>
-          <p id="liveModalDescription" class="live-modal-description"></p>
-        </div>
+      <div class="live-modal-meta-wrapper">
+        <div id="liveModalMeta" class="live-modal-meta"></div>
+        <div id="liveModalExtra" class="live-modal-meta"></div>
       </div>
       <div id="liveModalDose" class="live-modal-dose-display"></div>
     </div>
-    <div id="liveModalMeta" class="live-modal-meta"></div>
-    <div id="liveModalExtra" class="live-modal-meta"></div>
     <div class="live-chart-stack">
       <div class="live-range-selector">
         <button class="live-range-btn active" data-range="day">24h</button>
@@ -5105,14 +5119,20 @@ async function openLiveModal(deviceID, fallback) {
   if (doseEl) {
     if (fallbackMarker.doseRate !== null && fallbackMarker.doseRate !== undefined) {
       console.log('Fallback dose rate:', fallbackMarker.doseRate);
+      console.log('Current unit:', currentUnit);
       const primaryValue = formatPrimaryUnit(fallbackMarker.doseRate);
       const altValue = formatSecondaryUnit(fallbackMarker.doseRate);
       const primaryUnit = currentUnit === 'uR' ? 'µR/h' : 'µSv/h';
       const altUnit = currentUnit === 'uR' ? 'µSv/h' : 'µR/h';
+      const local = approximateLocalTime(fallback && fallback.lat ? parseFloat(fallback.lat) : undefined, fallback && fallback.lon ? parseFloat(fallback.lon) : undefined);
+      const lastSeen = fallbackMarker.date ? formatDateTime(fallbackMarker.date) : '';
+      const doseColor = getGradientColor(fallbackMarker.doseRate);
+      console.log('Primary value:', primaryValue, 'Color:', doseColor);
       
       doseEl.innerHTML = `
-        <div class="live-modal-dose-value" style="color:${getGradientColor(fallbackMarker.doseRate)};">${primaryValue} <span style="font-size:0.5em;">${primaryUnit}</span></div>
-        <div class="live-modal-dose-alt">${altValue} ${altUnit}</div>
+        <div class="live-modal-dose-value" style="color:${doseColor};">${primaryValue} <span style="font-size:0.45em;">${primaryUnit}</span></div>
+        <div class="live-modal-dose-alt" style="color:${doseColor};">${altValue} ${altUnit}</div>
+        ${lastSeen ? `<div class="live-modal-dose-time"><strong>${translate('live_marker_last_seen')}:</strong> ${escapeHtml(lastSeen)}</div>` : ''}
       `;
     } else {
       console.log('No fallback dose rate available');
@@ -5152,19 +5172,35 @@ async function openLiveModal(deviceID, fallback) {
       // Get the most recent measurement
       const latest = data.series.day[data.series.day.length - 1];
       console.log('Latest data point:', latest);
+      console.log('Latest value raw (µR/h):', latest.value, 'Current unit:', currentUnit);
       if (latest && typeof latest.value === 'number') {
-        const primaryValue = formatPrimaryUnit(latest.value);
-        const altValue = formatSecondaryUnit(latest.value);
+        // Convert from µR/h (server format) to µSv/h (internal format)
+        const valueSv = latest.value / 100;
+        console.log('Converted to µSv/h:', valueSv);
+        const primaryValue = formatPrimaryUnit(valueSv);
+        const altValue = formatSecondaryUnit(valueSv);
         const primaryUnit = currentUnit === 'uR' ? 'µR/h' : 'µSv/h';
         const altUnit = currentUnit === 'uR' ? 'µSv/h' : 'µR/h';
-        const lastSeen = latest.time ? formatLastSeen(latest.time) : '';
-        const local = approximateLocalTime(merged.lat, merged.lon);
+        const lastSeen = latest.time ? formatDateTime(latest.time) : '';
+        const doseColor = getGradientColor(valueSv);
+        console.log('From history - Primary value:', primaryValue, 'Color:', doseColor);
+        
+        // Get temperature from latest extra data
+        let tempHtml = '';
+        if (data.extraSeries && data.extraSeries.day && data.extraSeries.day.length > 0) {
+          const latestExtra = data.extraSeries.day[data.extraSeries.day.length - 1];
+          if (latestExtra && latestExtra.temp !== null && latestExtra.temp !== undefined) {
+            const tempC = latestExtra.temp.toFixed(1);
+            const tempF = ((latestExtra.temp * 9/5) + 32).toFixed(1);
+            tempHtml = `<div class="live-modal-dose-temp">${tempC}°C (${tempF}°F)</div>`;
+          }
+        }
         
         doseEl.innerHTML = `
-          <div class="live-modal-dose-value" style="color:${getGradientColor(latest.value)};">${primaryValue} <span style="font-size:0.5em;">${primaryUnit}</span></div>
-          <div class="live-modal-dose-alt">${altValue} ${altUnit}</div>
+          <div class="live-modal-dose-value" style="color:${doseColor};">${primaryValue} <span style="font-size:0.45em;">${primaryUnit}</span></div>
+          <div class="live-modal-dose-alt" style="color:${doseColor};">${altValue} ${altUnit}</div>
+          ${tempHtml}
           ${lastSeen ? `<div class="live-modal-dose-time"><strong>${translate('live_marker_last_seen')}:</strong> ${escapeHtml(lastSeen)}</div>` : ''}
-          ${local ? `<div class="live-modal-dose-time"><strong>${translate('live_marker_local_time')}:</strong> ${escapeHtml(local.text)} (${escapeHtml(local.zone)})</div>` : ''}
         `;
         console.log('Dose display updated with:', primaryValue, primaryUnit);
       }
