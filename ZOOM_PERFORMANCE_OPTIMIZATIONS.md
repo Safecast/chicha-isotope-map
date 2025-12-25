@@ -41,11 +41,11 @@ At low zoom levels (especially zoom 7 and below) with tens of thousands of marke
 - **Location**: `getRadius()` function in map.html
 
 ### 5. **SERVER-SIDE Density-Based Sampling** ✅ **NEW!**
-**Impact: 75% less network traffic at zoom 7, 85-90% at zoom ≤ 6**
+**Impact: 85% less network traffic at zoom 7, 80% at zoom 6**
 
-- **Zoom 7**: Sends only **25%** of markers (skips 75%) - as requested!
-- **Zoom 6**: Sends only **15%** of markers (skips 85%)
-- **Zoom ≤ 5**: Sends only **10%** of markers (skips 90%)
+- **Zoom 7**: Sends only **15%** of markers (skips 85%) - **INCREASED for better visibility**
+- **Zoom 6**: Sends only **20%** of markers (skips 80%) - **INCREASED for better visibility**
+- **Zoom ≤ 5**: Sends only **2%** of markers (skips 98%)
 - **Zoom ≥ 8**: Sends all markers (100%)
 
 **Why this is better than client-side sampling:**
@@ -58,7 +58,7 @@ At low zoom levels (especially zoom 7 and below) with tens of thousands of marke
 **How it works:**
 1. Server calculates sample rate based on zoom level
 2. Uses modulo arithmetic for deterministic sampling (every Nth marker)
-3. Logs sampling activity: `density reduction: zoom=7 rate=0.25 (sending ~25% of markers)`
+3. Logs sampling activity: `density reduction: zoom=6 rate=0.20 (sending ~20% of markers)`
 
 **Location**: 
 - `calculateSampleRate()` function in safecast-new-map.go
@@ -94,9 +94,9 @@ At low zoom levels (especially zoom 7 and below) with tens of thousands of marke
 
 | Zoom | Markers Sent | Network Savings | FPS Gain |
 |------|--------------|----------------|----------|
-| ≤ 5  | 10%          | 90% reduction  | 20-30x   |
-| 6    | 15%          | 85% reduction  | 15-20x   |
-| 7    | 25%          | 75% reduction  | 10-15x   |
+| ≤ 5  | 2%           | 98% reduction  | 30-50x   |
+| 6    | 20%          | 80% reduction  | 10-15x   |
+| 7    | 15%          | 85% reduction  | 12-18x   |
 | 8+   | 100%         | No reduction   | 2-5x     |
 
 ## Monitoring Server-Side Sampling
@@ -109,8 +109,8 @@ Watch the server logs to see the sampling in action:
 
 When you load a low zoom level view, you'll see:
 ```
-density reduction: zoom=7 rate=0.25 (sending ~25% of markers)
-density reduction: zoom=6 rate=0.15 (sending ~15% of markers)
+density reduction: zoom=7 rate=0.15 (sending ~15% of markers)
+density reduction: zoom=6 rate=0.20 (sending ~20% of markers)
 ```
 
 This confirms the server is reducing data before sending.

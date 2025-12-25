@@ -7221,14 +7221,14 @@ func calculateSampleRate(zoom int, minLat, minLon, maxLat, maxLon float64) float
 
 	// Sample rate based on zoom level to achieve target performance
 	// More aggressive sampling for smoother performance
-	// Zoom 7: ~10% (1 in 10) - down from 25%
-	// Zoom 6: ~5% (1 in 20)  - down from 15%
+	// Zoom 7: ~15% (1 in 7) - increased for better visibility
+	// Zoom 6: ~20% (1 in 5)  - increased for better visibility
 	// Zoom 5 and below: ~2% (1 in 50) - down from 10%
 	switch zoom {
 	case 7:
-		return 0.10 // Send 10% of markers (skip 90%)
+		return 0.15 // Send 15% of markers (skip 85%)
 	case 6:
-		return 0.05 // Send 5% of markers (skip 95%)
+		return 0.20 // Send 20% of markers (skip 80%)
 	default: // zoom <= 5
 		return 0.02 // Send 2% of markers (skip 98%)
 	}
