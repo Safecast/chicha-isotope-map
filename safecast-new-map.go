@@ -4040,7 +4040,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 			clientIP = forwarded
 		}
-		
+
 		// Get earliest marker date for this track to populate RecordingDate
 		var recordingDate int64
 		var minDateQuery string
@@ -4050,7 +4050,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			minDateQuery = `SELECT MIN(date) FROM markers WHERE trackID = ?`
 		}
 		_ = db.DB.QueryRowContext(r.Context(), minDateQuery, trackID).Scan(&recordingDate)
-		
+
 		upload := database.Upload{
 			Filename:      fh.Filename,
 			FileType:      ext,
@@ -4058,7 +4058,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 			FileSize:      fh.Size,
 			UploadIP:      clientIP,
 			RecordingDate: recordingDate, // Earliest marker date
-			CreatedAt:     0,              // Will be set to current time by InsertUpload
+			CreatedAt:     0,             // Will be set to current time by InsertUpload
 		}
 		if _, uploadErr := db.InsertUpload(r.Context(), upload); uploadErr != nil {
 			logT(trackID, "Upload", "warning: failed to track upload: %v", uploadErr)
@@ -6928,7 +6928,7 @@ func apiTracksBoundsHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Query bounds for this track
 		var tMinLat, tMinLon, tMaxLat, tMaxLon sql.NullFloat64
-		
+
 		var query string
 		if *dbType == "pgx" {
 			query = `SELECT MIN(lat) as min_lat, MIN(lon) as min_lon, MAX(lat) as max_lat, MAX(lon) as max_lon 
@@ -7049,7 +7049,7 @@ func getMarkersHandler(w http.ResponseWriter, r *http.Request) {
 	maxLat, _ := strconv.ParseFloat(q.Get("maxLat"), 64)
 	maxLon, _ := strconv.ParseFloat(q.Get("maxLon"), 64)
 	trackID := q.Get("trackID")
-	trackIDsParam := q.Get("trackIDs")  // Multiple tracks
+	trackIDsParam := q.Get("trackIDs") // Multiple tracks
 
 	// ----- ✈️🚗🚶 фильтр скорости  ---------------------------------
 	var sr []database.SpeedRange
@@ -7273,21 +7273,21 @@ func sampleMarkerChannel(ctx context.Context, in <-chan database.Marker, sampleR
 func streamMultipleTracks(ctx context.Context, trackIDs []string, zoom int, minLat, minLon, maxLat, maxLon float64, dbType string) (<-chan database.Marker, <-chan error) {
 	out := make(chan database.Marker)
 	errOut := make(chan error, len(trackIDs))
-	
+
 	var wg sync.WaitGroup
-	
+
 	for _, trackID := range trackIDs {
 		trackID = strings.TrimSpace(trackID)
 		if trackID == "" {
 			continue
 		}
-		
+
 		wg.Add(1)
 		go func(tid string) {
 			defer wg.Done()
-			
+
 			markerCh, errCh := db.StreamMarkersByTrackIDZoomAndBounds(ctx, tid, zoom, minLat, minLon, maxLat, maxLon, dbType)
-			
+
 			for {
 				select {
 				case <-ctx.Done():
@@ -7316,14 +7316,14 @@ func streamMultipleTracks(ctx context.Context, trackIDs []string, zoom int, minL
 			}
 		}(trackID)
 	}
-	
+
 	// Close output channel when all tracks are done
 	go func() {
 		wg.Wait()
 		close(out)
 		close(errOut)
 	}()
-	
+
 	return out, errOut
 }
 
