@@ -133,6 +133,7 @@ func (f *Fetcher) poll(ctx context.Context) error {
 		}
 
 		// Download log file
+		// Download log file
 		f.logf("[safecast-fetcher] import #%d: downloading %s", imp.ID, imp.Name)
 		content, filename, err := DownloadLogFile(ctx, imp.SourceURL)
 		if err != nil {
@@ -141,8 +142,19 @@ func (f *Fetcher) poll(ctx context.Context) error {
 			continue
 		}
 
+		// Fetch username from API
+		username := ""
+		if imp.UserID > 0 {
+			user, err := f.client.FetchUser(ctx, imp.UserID)
+			if err != nil {
+				f.logf("[safecast-fetcher] import #%d: warning: failed to fetch username for user %d: %v", imp.ID, imp.UserID, err)
+			} else if user != nil {
+				username = user.Name
+			}
+		}
+
 		// Import the file
-		result, err := ImportSafecastFile(ctx, content, filename, imp.ID, imp.SourceURL, fmt.Sprintf("%d", imp.UserID), f.db, f.dbType, f.importer)
+		result, err := ImportSafecastFile(ctx, content, filename, imp.ID, imp.SourceURL, fmt.Sprintf("%d", imp.UserID), username, f.db, f.dbType, f.importer)
 		if err != nil {
 			f.logf("[safecast-fetcher] import #%d: import failed: %v", imp.ID, err)
 			errors++

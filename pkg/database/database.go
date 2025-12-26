@@ -1562,12 +1562,14 @@ CREATE TABLE IF NOT EXISTS uploads (
   source          TEXT,
   source_id       TEXT,
   source_url      TEXT,
-  user_id         TEXT
+  user_id         TEXT,
+  username        TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_uploads_track_id ON uploads(track_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON uploads(created_at);
 CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_username ON uploads(username);
 `
 
 	case "sqlite", "chai":

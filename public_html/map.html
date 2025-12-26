@@ -7268,7 +7268,7 @@ function centerMapToLocation() {
     if (currentColoring === 'safecast') {
       var desc = translate('legend_safecast_desc');
       if (desc === 'legend_safecast_desc') {
-        desc = "Safecast high-resolution radiation gradient (15 steps). Colors represent dose rates based on international background radiation standards.";
+        desc = "This is the traditional radiation level color scale adopted by Safecast in 2013 and used consistently on our maps since then. Users have found it intuitive to understand, as lower radiation levels are depicted as \"cool\", and higher levels as \"warm.\" The wide color range allows subtle differences to be distinguished instantly at a glance, and it is logarithmic, allowing users to easily see the relatively smaller differences in radiation levels close natural background, while allowing levels several orders of magnitude higher to be displayed as well.";
       }
       return '<p>' + desc + '</p>';
     }

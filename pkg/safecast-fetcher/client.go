@@ -122,3 +122,44 @@ func (c *Client) FetchApprovedImports(ctx context.Context, uploadedAfter string,
 
 	return imports, nil
 }
+
+// SafecastUser represents a user from api.safecast.org
+type SafecastUser struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// FetchUser queries the API for user information by ID
+func (c *Client) FetchUser(ctx context.Context, userID int64) (*SafecastUser, error) {
+	// Build URL: GET /users/:id.json
+	u := fmt.Sprintf("%s/users/%d.json", c.baseURL, userID)
+
+	// Create request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // User not found
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Parse JSON response
+	var user SafecastUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &user, nil
+}

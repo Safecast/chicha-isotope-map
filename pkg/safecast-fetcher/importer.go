@@ -17,6 +17,7 @@ type ImporterFunc func(
 	safecastImportID int64,
 	sourceURL string,
 	userID string,
+	username string,
 	db *database.Database,
 	dbType string,
 ) (trackID string, markerCount int, err error)
@@ -42,6 +43,7 @@ func ImportSafecastFile(
 	safecastImportID int64,
 	sourceURL string,
 	userID string,
+	username string,
 	db *database.Database,
 	dbType string,
 	importer ImporterFunc,
@@ -61,7 +63,7 @@ func ImportSafecastFile(
 	}
 
 	// Execute import
-	trackID, markerCount, err := importFunc(ctx, fileContent, filename, safecastImportID, sourceURL, userID, db, dbType)
+	trackID, markerCount, err := importFunc(ctx, fileContent, filename, safecastImportID, sourceURL, userID, username, db, dbType)
 	if err != nil {
 		result.Error = err
 		return result, fmt.Errorf("import failed: %w", err)

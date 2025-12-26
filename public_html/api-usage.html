@@ -3,101 +3,68 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Safecast New Map — API Guide</title>
+  <title>Safecast New Map — API Documentation</title>
   <link rel="icon" href="/static/images/android-chrome-192x192.png" />
   <style>
     :root {
       color-scheme: light dark;
-      --page-bg: #f2f5f8;
-      --card-bg: rgba(255, 255, 255, 0.92);
-      --card-border: 1px solid rgba(15, 23, 42, 0.08);
-      --fg: #101828;
-      --muted: rgba(15, 23, 42, 0.65);
-      --accent: #2563eb;
-      --code-bg: rgba(15, 23, 42, 0.06);
-      --code-border: 1px solid rgba(15, 23, 42, 0.08);
-      --font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --info-card-bg: rgba(255, 255, 255, 0.92);
-      --info-card-border: 1px solid rgba(15, 23, 42, 0.08);
-      --api-method-bg: rgba(37, 99, 235, 0.12);
-      --api-method-text: #1d4ed8;
+      --bg: #ffffff;
+      --fg: #24292f;
+      --border: #d0d7de;
+      --accent: #0969da;
+      --code-bg: #f6f8fa;
+      --heading: #1f2328;
+      --muted: #656d76;
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --page-bg: #0b1120;
-        --card-bg: rgba(15, 23, 42, 0.85);
-        --card-border: 1px solid rgba(148, 163, 184, 0.12);
-        --fg: #e2e8f0;
-        --muted: rgba(226, 232, 240, 0.72);
-        --accent: #60a5fa;
-        --code-bg: rgba(30, 41, 59, 0.8);
-        --code-border: 1px solid rgba(148, 163, 184, 0.18);
-        --info-card-bg: rgba(15, 23, 42, 0.85);
-        --info-card-border: 1px solid rgba(148, 163, 184, 0.18);
-        --api-method-bg: rgba(96, 165, 250, 0.18);
-        --api-method-text: #bfdbfe;
+        --bg: #0d1117;
+        --fg: #e6edf3;
+        --border: #30363d;
+        --accent: #58a6ff;
+        --code-bg: #161b22;
+        --heading: #e6edf3;
+        --muted: #8b949e;
       }
     }
 
-    * { box-sizing: border-box; }
+    * { 
+      box-sizing: border-box; 
+      margin: 0;
+      padding: 0;
+    }
 
     body {
-      margin: 0;
-      font-family: var(--font-family);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+      line-height: 1.6;
       color: var(--fg);
-      background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.14), transparent 45%),
-                  radial-gradient(circle at 80% 0%, rgba(192, 38, 211, 0.12), transparent 55%),
-                  var(--page-bg);
+      background: var(--bg);
+      padding: 20px;
     }
 
-    main.shell {
-      max-width: 960px;
+    main {
+      max-width: 980px;
       margin: 0 auto;
-      padding: 40px 24px 64px;
-      display: flex;
-      flex-direction: column;
-      gap: 28px;
     }
 
-    header.hero {
-      background: linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(6, 182, 212, 0.12));
-      border-radius: 18px;
-      padding: 28px;
-      box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+    h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      color: var(--heading);
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
     }
 
-    header.hero h1 {
-      margin: 0 0 12px;
-      font-size: clamp(2rem, 3vw, 2.4rem);
-      letter-spacing: -0.01em;
-    }
-
-    header.hero p {
-      margin: 0;
-      font-size: 1.02rem;
-      color: rgba(15, 23, 42, 0.75);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      header.hero p {
-        color: rgba(226, 232, 240, 0.78);
-      }
-    }
-
-    .card {
-      background: var(--card-bg);
-      border: var(--card-border);
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
-    }
-
-    .card h2 {
-      margin-top: 0;
-      margin-bottom: 12px;
-      font-size: 1.4rem;
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--heading);
+      margin-top: 32px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
     }
 
     .card p {
@@ -229,125 +196,180 @@
   </style>
 </head>
 <body data-archive-enabled="__ARCHIVE_ENABLED__">
-  <main class="shell">
-    <header class="hero">
-      <h1>Safecast New Map — API Guide</h1>
-      <p>Detailed documentation for the JSON endpoints served from <code>__API_ROOT__</code> on <code>__DISPLAY_HOST__</code>.</p>
-    </header>
+  <main>
+    <h1>API Documentation</h1>
+    <p class="subtitle">RESTful JSON endpoints for accessing radiation measurement data</p>
 
-    <section class="card">
-      <h2>Base URL</h2>
-      <p>All requests begin with <code>__API_ROOT__</code>. When the server runs with a configured domain the same endpoint is available over HTTPS.</p>
-      <p>The examples below assume <code>__BASE_URL__</code>; replace it with your preferred host or short-link.</p>
-    </section>
+    <h2>Overview</h2>
+    <p>The Safecast New Map API provides programmatic access to radiation measurements, track data, and statistics. All endpoints return JSON and are accessible from <code>__API_ROOT__</code> on <code>__DISPLAY_HOST__</code>.</p>
+    <p><strong>Base URL:</strong> <code>__BASE_URL__</code></p>
 
-    <section class="card">
-      <h2>Quickstart endpoints</h2>
-      <p>Each card mirrors the API quickstart modal on the map. Links open the live JSON payload in a new tab.</p>
-      <div class="api-grid">
-        <article class="api-card">
-          <div class="api-card-head">
-            <span class="api-method">GET</span>
-            <span class="api-path">/api</span>
-          </div>
-          <h3 class="api-card-title">Machine-readable index</h3>
-          <p class="api-card-desc">Lists metadata, dataset statistics, and hyperlinks to every other endpoint.</p>
-          <a class="api-card-link" href="__BASE_URL__/api" target="_blank" rel="noopener">Open /api</a>
-          <p class="api-card-note">Start here to discover collections and server status.</p>
-        </article>
+    <h2>Quick Reference</h2>
 
-        <article class="api-card">
-          <div class="api-card-head">
-            <span class="api-method">GET</span>
-            <span class="api-path">/api/latest</span>
-          </div>
-          <h3 class="api-card-title">Latest nearby measurements</h3>
-          <p class="api-card-desc">Returns the newest markers near the supplied latitude, longitude, and radius in metres.</p>
-          <a class="api-card-link" href="__BASE_URL__/api/latest?lat=35.6804&lon=139.7690&radius_m=1500&limit=20" target="_blank" rel="noopener">Latest near Tokyo</a>
-          <a class="api-card-link" href="__BASE_URL__/api/latest?lat=51.3890&lon=30.0990&radius_m=2200&limit=20" target="_blank" rel="noopener">Latest near Chernobyl</a>
-          <p class="api-card-note">Adjust <code>lat</code>, <code>lon</code>, and <code>radius_m</code> to focus on your own area.</p>
-        </article>
-
-        <article class="api-card">
-          <div class="api-card-head">
-            <span class="api-method">GET</span>
-            <span class="api-path">/api/tracks</span>
-          </div>
-          <h3 class="api-card-title">All track summaries</h3>
-          <p class="api-card-desc">Streams a catalog of published tracks including indices, counts, and download URLs.</p>
-          <a class="api-card-link" href="__BASE_URL__/api/tracks?limit=25" target="_blank" rel="noopener">List first tracks</a>
-          <p class="api-card-note">Paginate with <code>limit</code> and <code>offset</code>.</p>
-        </article>
-
-        <article class="api-card">
-          <div class="api-card-head">
-            <span class="api-method">GET</span>
-            <span class="api-path">/api/tracks/index/{number}</span>
-          </div>
-          <h3 class="api-card-title">Download track by index</h3>
-          <p class="api-card-desc">Resolves the Nth track and returns the same JSON document as <code>/api/track/{id}.json</code> (legacy <code>.cim</code> URLs remain available).</p>
-          <a class="api-card-link" href="__BASE_URL__/api/tracks/index/1" target="_blank" rel="noopener">Fetch index 1</a>
-          <p class="api-card-note">Replace the number to pick a different entry.</p>
-        </article>
-
-        <article class="api-card" data-requires-archive>
-          <div class="api-card-head">
-            <span class="api-method">GET</span>
-            <span class="api-path">/api/json/{frequency}.tgz</span>
-          </div>
-          <h3 class="api-card-title">JSON archive bundle</h3>
-          <p class="api-card-desc">Downloads a tgz archive with every published <code>.json</code> export (compatible with historic <code>.cim</code> readers). Updated once per __ARCHIVE_FREQUENCY__.</p>
-          <a class="api-card-link" href="__BASE_URL____ARCHIVE_ROUTE__" target="_blank" rel="noopener">Download archive</a>
-          <p class="api-card-note">Enabled when the node starts with <code>-json-archive-path</code>.</p>
-        </article>
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api</span>
       </div>
-    </section>
+      <p>Machine-readable index listing all available endpoints, dataset statistics, and server metadata.</p>
+      <div class="example">
+        <div class="example-label">Try it:</div>
+        <a href="__BASE_URL__/api" target="_blank" rel="noopener">__BASE_URL__/api</a>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Working with /api/latest</h2>
-      <p>The endpoint accepts decimal degrees for <code>lat</code> and <code>lon</code>, a search radius in metres (<code>radius_m</code>), and an optional <code>limit</code> (default 25, max 200). Results are sorted from newest to oldest.</p>
-      <pre>curl -s "__BASE_URL__/api/latest?lat=35.6804&lon=139.7690&radius_m=1500&limit=10" | jq '.markers[0]'</pre>
-      <pre>curl -s "__BASE_URL__/api/latest?lat=51.3890&lon=30.0990&radius_m=2200&limit=15" | jq '.returned'</pre>
-    </section>
-
-    <section class="card">
-      <h2>Track catalog</h2>
-      <p>Use <code>/api/tracks</code> for alphabetic listings, <code>/api/tracks/years/{year}</code> or <code>/api/tracks/months/{year}/{month}</code> for time windows, and <code>/api/tracks/index/{n}</code> for deterministic downloads.</p>
-      <pre>curl -s "__BASE_URL__/api/tracks?limit=25" | jq '.tracks[0].apiURL'</pre>
-      <pre>curl -s "__BASE_URL__/api/tracks/years/2024" | jq '.tracks | length'</pre>
-    </section>
-
-    <section class="card">
-      <h2>Track payloads</h2>
-      <p>Each track streams as newline-delimited JSON with the <code>.json</code> suffix so browsers save the file. Optional <code>from</code> and <code>to</code> parameters filter the marker ID range. Older <code>.cim</code> URLs keep working for compatibility.</p>
-      <pre>curl -L -o sample.json "__BASE_URL__/api/track/ABC123.json"</pre>
-    </section>
-
-    <section class="card" data-requires-archive>
-      <h2>JSON archive</h2>
-      <p>When <code>-json-archive-path</code> is set, the node builds a tgz bundle on a schedule (daily, weekly, monthly, or yearly). Download it at <code>__BASE_URL____ARCHIVE_ROUTE__</code>.</p>
-      <pre>curl -L -o archive.tgz "__BASE_URL____ARCHIVE_ROUTE__"</pre>
-    </section>
-
-    <section class="card">
-      <h2>Short links</h2>
-      <p>The <code>/api/shorten</code> endpoint issues and finalises shareable URLs for map views. Submit JSON with <code>url</code>, optional <code>code</code>, and <code>commit</code>.</p>
-      <pre>curl -s -X POST "__BASE_URL__/api/shorten" \
-  -H 'content-type: application/json' \
-  -d '{"url":"/", "commit":false}' | jq</pre>
-    </section>
-
-    <section class="card">
-      <h2>Rate limiting &amp; conventions</h2>
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/latest</span>
+      </div>
+      <p>Retrieve the latest radiation measurements within a geographic radius.</p>
+      <p><strong>Parameters:</strong></p>
       <ul>
-        <li>Responses may include <code>X-RateLimit-Notice</code> and <code>X-RateLimit-Delay</code> headers when the per-IP queue slows requests for fairness.</li>
-        <li>Timestamps are Unix seconds. Some sources ship millisecond precision and are normalised automatically.</li>
-        <li>Dose rates are in <code>µSv/h</code>; count rates are in <code>CPS</code>. Every payload includes a <code>disclaimers</code> map to surface the licence notice in your app.</li>
+        <li><code>lat</code> - Latitude in decimal degrees</li>
+        <li><code>lon</code> - Longitude in decimal degrees</li>
+        <li><code>radius_m</code> - Search radius in meters</li>
+        <li><code>limit</code> - Maximum results (default: 25, max: 200)</li>
       </ul>
-    </section>
+      <div class="example">
+        <div class="example-label">Examples:</div>
+        <a href="__BASE_URL__/api/latest?lat=35.6804&lon=139.7690&radius_m=1500&limit=20" target="_blank" rel="noopener">Latest near Tokyo</a><br>
+        <a href="__BASE_URL__/api/latest?lat=51.3890&lon=30.0990&radius_m=2200&limit=20" target="_blank" rel="noopener">Latest near Chernobyl</a>
+      </div>
+      <pre><code>curl -s "__BASE_URL__/api/latest?lat=35.6804&lon=139.7690&radius_m=1500&limit=10" | jq</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/tracks</span>
+      </div>
+      <p>List all available tracks with metadata and download URLs.</p>
+      <p><strong>Parameters:</strong></p>
+      <ul>
+        <li><code>limit</code> - Number of tracks per page</li>
+        <li><code>offset</code> - Pagination offset</li>
+      </ul>
+      <div class="example">
+        <div class="example-label">Try it:</div>
+        <a href="__BASE_URL__/api/tracks?limit=25" target="_blank" rel="noopener">List first 25 tracks</a>
+      </div>
+      <pre><code>curl -s "__BASE_URL__/api/tracks?limit=25" | jq '.tracks[0]'</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/tracks/years/{year}</span>
+      </div>
+      <p>Filter tracks by year.</p>
+      <pre><code>curl -s "__BASE_URL__/api/tracks/years/2024" | jq '.tracks | length'</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/tracks/months/{year}/{month}</span>
+      </div>
+      <p>Filter tracks by year and month.</p>
+      <pre><code>curl -s "__BASE_URL__/api/tracks/months/2024/12" | jq</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/tracks/index/{number}</span>
+      </div>
+      <p>Retrieve track by index number. Returns the same data as <code>/api/track/{id}.json</code>.</p>
+      <div class="example">
+        <div class="example-label">Try it:</div>
+        <a href="__BASE_URL__/api/tracks/index/1" target="_blank" rel="noopener">Fetch track index 1</a>
+      </div>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/track/{id}.json</span>
+      </div>
+      <p>Download complete track data as newline-delimited JSON. Legacy <code>.cim</code> format is also supported.</p>
+      <p><strong>Optional Parameters:</strong></p>
+      <ul>
+        <li><code>from</code> - Start marker ID</li>
+        <li><code>to</code> - End marker ID</li>
+      </ul>
+      <pre><code>curl -L -o track.json "__BASE_URL__/api/track/ABC123.json"</code></pre>
+    </div>
+
+    <div class="endpoint" data-requires-archive>
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/json/{frequency}.tgz</span>
+      </div>
+      <p>Download compressed archive containing all tracks. Available frequencies: <code>daily</code>, <code>weekly</code>, <code>monthly</code>, <code>yearly</code>.</p>
+      <p>Updated once per __ARCHIVE_FREQUENCY__. Enabled when server starts with <code>-json-archive-path</code>.</p>
+      <div class="example">
+        <div class="example-label">Download:</div>
+        <a href="__BASE_URL____ARCHIVE_ROUTE__" target="_blank" rel="noopener">__BASE_URL____ARCHIVE_ROUTE__</a>
+      </div>
+      <pre><code>curl -L -o archive.tgz "__BASE_URL____ARCHIVE_ROUTE__"</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/stats</span>
+      </div>
+      <p>Retrieve global statistics about the dataset.</p>
+      <pre><code>curl -s "__BASE_URL__/api/stats" | jq</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">GET</span>
+        <span class="path">/api/countries</span>
+      </div>
+      <p>List all countries with radiation measurements and their statistics.</p>
+      <pre><code>curl -s "__BASE_URL__/api/countries" | jq</code></pre>
+    </div>
+
+    <div class="endpoint">
+      <div class="endpoint-header">
+        <span class="method">POST</span>
+        <span class="path">/api/shorten</span>
+      </div>
+      <p>Create short links for sharing map views.</p>
+      <p><strong>Request body:</strong></p>
+      <ul>
+        <li><code>url</code> - The URL to shorten (required)</li>
+        <li><code>code</code> - Custom short code (optional)</li>
+        <li><code>commit</code> - Finalize the link (boolean)</li>
+      </ul>
+      <pre><code>curl -s -X POST "__BASE_URL__/api/shorten" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"/", "commit":false}' | jq</code></pre>
+    </div>
+
+    <h2>Data Format</h2>
+    <p>All responses are in JSON format. Timestamps are Unix seconds. Some sources provide millisecond precision and are automatically normalized.</p>
+    <ul>
+      <li><strong>Dose rates:</strong> Expressed in µSv/h (microsieverts per hour)</li>
+      <li><strong>Count rates:</strong> Expressed in CPS (counts per second)</li>
+      <li><strong>Coordinates:</strong> WGS84 decimal degrees</li>
+    </ul>
+
+    <h2>Rate Limiting</h2>
+    <p>API requests are rate-limited per IP address to ensure fair usage. When rate limiting is active, responses include:</p>
+    <ul>
+      <li><code>X-RateLimit-Notice</code> - Information about rate limit status</li>
+      <li><code>X-RateLimit-Delay</code> - Suggested delay before next request</li>
+    </ul>
+
+    <h2>License</h2>
+    <p>All API responses include a <code>disclaimers</code> field with license information. Data is provided under the <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank">CC0 1.0 Universal</a> license.</p>
 
     <footer>
-      Server: <code>safecast-new-map</code>. Explore the web map at <a href="/" target="_blank" rel="noopener">/</a>.
+      Powered by <code>safecast-new-map</code> • <a href="/">View Map</a> • <a href="https://github.com/Safecast/safecast-new-map" target="_blank">GitHub</a>
     </footer>
   </main>
 </body>

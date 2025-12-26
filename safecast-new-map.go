@@ -4725,11 +4725,15 @@ func formatUploadRow(upload database.Upload, password string) string {
 		}
 	}
 
-	// Format user ID display
-	userIDDisplay := "-"
+	// Format user display (username + ID)
+	userDisplay := "-"
 	if upload.UserID != "" {
-		userIDDisplay = fmt.Sprintf(`<a href="/api/admin/uploads?password=%s&user_id=%s">%s</a>`,
-			password, upload.UserID, upload.UserID)
+		userText := upload.UserID
+		if upload.Username != "" {
+			userText = fmt.Sprintf("%s (%s)", upload.Username, upload.UserID)
+		}
+		userDisplay = fmt.Sprintf(`<a href="/api/admin/uploads?password=%s&user_id=%s">%s</a>`,
+			password, upload.UserID, userText)
 	}
 
 	return fmt.Sprintf(`
@@ -4755,7 +4759,7 @@ func formatUploadRow(upload database.Upload, password string) string {
 		recordingDate,
 		fileSize,
 		sourceIDNumeric, sourceDisplay,
-		userIDDisplay,
+		userDisplay,
 		upload.UploadIP,
 		uploadTime,
 		upload.TrackID,
@@ -5113,7 +5117,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th class="sortable" onclick="sortTable(5)" data-type="date">Recording Date</th>
 				<th class="sortable" onclick="sortTable(6)" data-type="text">Size</th>
 				<th class="sortable" onclick="sortTable(7)" data-type="text">Source</th>
-				<th class="sortable" onclick="sortTable(8)" data-type="text">User ID</th>
+				<th class="sortable" onclick="sortTable(8)" data-type="text">User</th>
 				<th class="sortable" onclick="sortTable(9)" data-type="text">Upload IP</th>
 				<th class="sortable" onclick="sortTable(10)" data-type="date">Upload Time</th>
 				<th>Actions</th>
@@ -5127,7 +5131,7 @@ func adminUploadsHandler(w http.ResponseWriter, r *http.Request) {
 				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Size..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Source..." onkeyup="filterTable()"></th>
-				<th><input type="text" class="filter-input" placeholder="User ID..." onkeyup="filterTable()"></th>
+				<th><input type="text" class="filter-input" placeholder="User..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="IP..." onkeyup="filterTable()"></th>
 				<th><input type="text" class="filter-input" placeholder="Filter date..." onkeyup="filterTable()"></th>
 				<th></th>
@@ -5901,6 +5905,7 @@ func adminImportFromSafecastHandler(w http.ResponseWriter, r *http.Request) {
 					SourceID:  fmt.Sprintf("%d", imp.ID),
 					SourceURL: imp.SourceURL,
 					UserID:    fmt.Sprintf("%d", imp.UserID),
+					Username:  "",  // TODO: Fetch from API
 				}
 
 				if _, err := db.InsertUpload(ctx, upload); err != nil {
@@ -8190,10 +8195,10 @@ func main() {
 			safecastImportID int64,
 			sourceURL string,
 			userID string,
+			username string,
 			db *database.Database,
 			dbType string,
 		) (trackID string, markerCount int, err error) {
-			// Generate new track ID
 			trackID = GenerateSerialNumber()
 
 			// Create BytesFile from content
@@ -8207,7 +8212,7 @@ func main() {
 
 			// Count markers for this track by querying the database
 			countQuery := "SELECT COUNT(*) FROM markers WHERE trackID = ?"
-			if dbType == "postgres" || dbType == "duckdb" {
+			if dbType == "pgx" || dbType == "postgres" || dbType == "duckdb" {
 				countQuery = "SELECT COUNT(*) FROM markers WHERE trackID = $1"
 			}
 			err = db.DB.QueryRowContext(ctx, countQuery, finalTrackID).Scan(&markerCount)
@@ -8217,18 +8222,28 @@ func main() {
 				markerCount = 0
 			}
 
+			// Get earliest marker date for this track to populate RecordingDate
+			var recordingDate int64
+			minDateQuery := "SELECT MIN(date) FROM markers WHERE trackID = ?"
+			if dbType == "pgx" {
+				minDateQuery = "SELECT MIN(date) FROM markers WHERE trackID = $1"
+			}
+			_ = db.DB.QueryRowContext(ctx, minDateQuery, finalTrackID).Scan(&recordingDate)
+
 			// Record the upload with source tracking
 			upload := database.Upload{
-				Filename:  filename,
-				FileType:  ".log",
-				TrackID:   finalTrackID,
-				FileSize:  int64(len(fileContent)),
-				UploadIP:  "safecast-api",
-				CreatedAt: time.Now().Unix(),
-				Source:    safecastfetcher.SourceTypeSafecastAPI,
-				SourceID:  fmt.Sprintf("%d", safecastImportID),
-				SourceURL: sourceURL,
-				UserID:    userID,
+				Filename:      filename,
+				FileType:      ".log",
+				TrackID:       finalTrackID,
+				FileSize:      int64(len(fileContent)),
+				UploadIP:      "safecast-api",
+				CreatedAt:     time.Now().Unix(),
+				RecordingDate: recordingDate, // Earliest marker date from log file
+				Source:        safecastfetcher.SourceTypeSafecastAPI,
+				SourceID:      fmt.Sprintf("%d", safecastImportID),
+				SourceURL:     sourceURL,
+				UserID:        userID,
+			Username:      username,
 			}
 
 			if _, err := db.InsertUpload(ctx, upload); err != nil {
