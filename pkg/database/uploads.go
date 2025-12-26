@@ -130,12 +130,12 @@ func (db *Database) GetUploadsPaginated(ctx context.Context, limit int, offset i
 		if db.Driver == "pgx" || db.Driver == "duckdb" {
 			// PostgreSQL: use ILIKE for case-insensitive search, also search numeric fields by converting to text
 			whereConditions = append(whereConditions, fmt.Sprintf(
-				"(u.track_id ILIKE $%d OR u.filename ILIKE $%d OR COALESCE(u.user_id, '') ILIKE $%d OR COALESCE(u.source, '') ILIKE $%d OR COALESCE(u.source_id, '') ILIKE $%d OR CAST(u.id AS TEXT) ILIKE $%d)",
-				paramCount, paramCount, paramCount, paramCount, paramCount, paramCount))
+				"(u.track_id ILIKE $%d OR u.filename ILIKE $%d OR COALESCE(u.user_id, '') ILIKE $%d OR COALESCE(u.username, '') ILIKE $%d OR COALESCE(u.source, '') ILIKE $%d OR COALESCE(u.source_id, '') ILIKE $%d OR CAST(u.id AS TEXT) ILIKE $%d OR TO_CHAR(u.recording_date, 'YYYY-MM-DD HH24:MI:SS') ILIKE $%d)",
+				paramCount, paramCount, paramCount, paramCount, paramCount, paramCount, paramCount, paramCount))
 		} else {
 			// SQLite: use LIKE (case-insensitive by default), also search numeric fields by converting to text
 			whereConditions = append(whereConditions,
-				"(u.track_id LIKE ? OR u.filename LIKE ? OR COALESCE(u.user_id, '') LIKE ? OR COALESCE(u.source, '') LIKE ? OR COALESCE(u.source_id, '') LIKE ? OR CAST(u.id AS TEXT) LIKE ?)")
+				"(u.track_id LIKE ? OR u.filename LIKE ? OR COALESCE(u.user_id, '') LIKE ? OR COALESCE(u.username, '') LIKE ? OR COALESCE(u.source, '') LIKE ? OR COALESCE(u.source_id, '') LIKE ? OR CAST(u.id AS TEXT) LIKE ? OR strftime('%Y-%m-%d %H:%M:%S', u.recording_date, 'unixepoch') LIKE ?)")
 		}
 	}
 
@@ -189,8 +189,8 @@ func (db *Database) GetUploadsPaginated(ctx context.Context, limit int, offset i
 		if db.Driver == "pgx" || db.Driver == "duckdb" {
 			args = append(args, searchPattern)
 		} else {
-			// SQLite needs the pattern repeated 6 times (for each field)
-			for i := 0; i < 6; i++ {
+			// SQLite needs the pattern repeated 8 times (for each field: track_id, filename, user_id, username, source, source_id, id, recording_date)
+			for i := 0; i < 8; i++ {
 				args = append(args, searchPattern)
 			}
 		}
@@ -351,13 +351,13 @@ func (db *Database) CountUploads(ctx context.Context, userID string, search stri
 		searchPattern := "%" + search + "%"
 		if db.Driver == "pgx" || db.Driver == "duckdb" {
 			whereConditions = append(whereConditions, fmt.Sprintf(
-				"(track_id ILIKE $%d OR filename ILIKE $%d OR COALESCE(user_id, '') ILIKE $%d OR COALESCE(source, '') ILIKE $%d OR COALESCE(source_id, '') ILIKE $%d OR CAST(id AS TEXT) ILIKE $%d)",
-				paramCount, paramCount, paramCount, paramCount, paramCount, paramCount))
+				"(track_id ILIKE $%d OR filename ILIKE $%d OR COALESCE(user_id, '') ILIKE $%d OR COALESCE(username, '') ILIKE $%d OR COALESCE(source, '') ILIKE $%d OR COALESCE(source_id, '') ILIKE $%d OR CAST(id AS TEXT) ILIKE $%d OR TO_CHAR(recording_date, 'YYYY-MM-DD HH24:MI:SS') ILIKE $%d)",
+				paramCount, paramCount, paramCount, paramCount, paramCount, paramCount, paramCount, paramCount))
 			args = append(args, searchPattern)
 		} else {
 			whereConditions = append(whereConditions,
-				"(track_id LIKE ? OR filename LIKE ? OR COALESCE(user_id, '') LIKE ? OR COALESCE(source, '') LIKE ? OR COALESCE(source_id, '') LIKE ? OR CAST(id AS TEXT) LIKE ?)")
-			for i := 0; i < 6; i++ {
+				"(track_id LIKE ? OR filename LIKE ? OR COALESCE(user_id, '') LIKE ? OR COALESCE(username, '') LIKE ? OR COALESCE(source, '') LIKE ? OR COALESCE(source_id, '') LIKE ? OR CAST(id AS TEXT) LIKE ? OR strftime('%Y-%m-%d %H:%M:%S', recording_date, 'unixepoch') LIKE ?)")
+			for i := 0; i < 8; i++ {
 				args = append(args, searchPattern)
 			}
 		}
